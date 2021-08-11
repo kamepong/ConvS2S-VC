@@ -2,7 +2,7 @@
 
 # Usage:
 # ./run_train_arctic_5spk_flen64ms_fshift8ms.sh 1 0 experiment1
-# If you want to start from the beggining, set the first argument to 0.
+# If you want to start from the beginning, set the first argument to 0.
 # If you want to skip the first stage, set it to 1.
 
 db_dir="/misc/raid58/kameoka.hirokazu/db/arctic_5spk/wav/training"
