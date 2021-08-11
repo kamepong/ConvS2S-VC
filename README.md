@@ -47,8 +47,8 @@ arXiv:2104.06900 [cs.SD], 2021.
 
 #### Parallel WaveGAN
 
-1. Setup Parallel WaveGAN.  Place a copy of the directory `parallel_wavegan` from https://github.com/kan-bayashi/ParallelWaveGAN in `pwg/`.
-2. Parallel WaveGAN models trained on several databases can be found [here](https://app.box.com/folder/127558077224). Once these are downloaded, place them in `pwg/egs/`. 
+1. Setup Parallel WaveGAN.  After creating the directory `pwg`, place a copy of the directory `parallel_wavegan` from https://github.com/kan-bayashi/ParallelWaveGAN in `pwg/`.
+2. Parallel WaveGAN models trained on several databases can be found [here](https://app.box.com/folder/127558077224). Once these are downloaded, place them in `pwg/egs/`. Please contact me if you have any problems downloading.
 
 ```bash
 # Model trained on the ATR database (11 speakers)
