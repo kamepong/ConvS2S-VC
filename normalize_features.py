@@ -79,6 +79,7 @@ def main():
         for f in walk_files(root, ext)
     ]
     
+    print('Normalizing features...')
     #import pdb;pdb.set_trace() # Breakpoint
     # debug
     #normalize_features(*fargs_list[0])

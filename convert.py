@@ -29,7 +29,6 @@ def audio_transform(wav_filepath, scaler, kwargs, device):
     num_mels = kwargs['num_mels']
     fs = kwargs['fs']
 
-    #import pdb; pdb.set_trace()
     audio, fs_ = sf.read(wav_filepath)
     if trim_silence:
         #print('trimming.')
@@ -156,7 +155,6 @@ def main():
     for tag in ['enc_src', 'enc_trg', 'dec']:
         model_dir = os.path.join(args.model_rootdir,args.experiment_name)
         mfilename = find_newest_model_file(model_dir, tag)
-        #import pdb; pdb.set_trace()
         path = os.path.join(args.model_rootdir,args.experiment_name,mfilename)
         if path is not None:
             checkpoint = torch.load(path, map_location=device)

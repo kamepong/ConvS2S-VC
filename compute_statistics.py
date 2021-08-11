@@ -45,6 +45,7 @@ def main():
     if not os.path.exists(os.path.dirname(stat_filepath)):
         os.makedirs(os.path.dirname(stat_filepath))
     
+    print('Computing statistics...')
     compute_statistics(src, stat_filepath)
 
 if __name__ == '__main__':

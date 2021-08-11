@@ -2,12 +2,14 @@
 
 # Example:
 # ./run_test_arctic_5spk_flen64ms_fshift8ms.sh 0 experiment1
-# ./run_test_arctic_5spk_flen64ms_fshift8ms.sh 0
 
 db_dir="/misc/raid58/kameoka.hirokazu/db/arctic_5spk/wav/test"
 dataset_name="arctic_5spk"
 exp_name=${2}
 #exp_name="experiment1"
+#refine_type="raw"
+refine_type="forward"
+#refine_type="diagonal"
 
 dconf_path="./dump/${dataset_name}/data_config.json"
 stat_path="./dump/${dataset_name}/stat.pkl"
@@ -22,4 +24,5 @@ python convert.py -g ${1} \
 	--out ${out_dir} \
 	--model_rootdir ${model_dir} \
 	--experiment_name ${exp_name} \
-	--voc_dir ${vocoder_dir}
+	--voc_dir ${vocoder_dir} \
+	--refine_type ${refine_type}

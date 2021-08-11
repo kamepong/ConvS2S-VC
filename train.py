@@ -43,6 +43,7 @@ def Train(models, epochs, train_loader, optimizers, model_config, device, model_
             print('{} loaded successfully.'.format(checkpointpath))
 
     print("===================================Start Training===================================")
+    logging.info(model_dir)
     for epoch in range(resume+1, epochs+1):
         b = 0
         w_da = w_da_init * np.exp(-epoch/50.0)

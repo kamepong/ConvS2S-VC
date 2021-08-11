@@ -1,8 +1,5 @@
 #!/bin/sh
 
-# Option:
-# $1: #gpu
-
 # Usage:
 # ./run_train_ATR_5spk_flen64ms_fshift8ms.sh 1 0 experiment1
 # If you want to start from the beggining, set the first argument to 0.

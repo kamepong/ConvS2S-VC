@@ -1,10 +1,6 @@
 #!/bin/sh
 
-# Option:
-# $1: #gpu
-
 # Usage:
-# ./run_train_whisper_flen64ms_fshift8ms.sh 1 0
 # ./run_train_whisper_flen64ms_fshift8ms.sh 1 0 experiment1
 # If you want to start from the beggining, set the first argument to 0.
 # If you want to skip the first stage, set it to 1.
@@ -13,9 +9,7 @@ db_dir="/misc/raid58/kameoka.hirokazu/db/ATR503Seki/train"
 dataset_name="whisper"
 exp_name=${3}
 #exp_name="experiment1"
-cond="--resume 100 --epochs 1000 --snapshot 100"
-#cond="--resume 0 --zdim 256 --kdim 256 --mdim 256" #experiment2
-#cond="--resume 0 --zdim 128 --kdim 128 --mdim 128 --hdim 16" #experiment3
+cond="--resume 0 --epochs 1000 --snapshot 100"
 
 feat_dir="./dump/${dataset_name}/feat/train"
 dconf_path="./dump/${dataset_name}/data_config.json"

@@ -1,9 +1,6 @@
 #!/bin/sh
 
-# Option:
-# $1: #gpu
-
-# example:
+# Usage:
 # ./run_train_arctic_5spk_flen64ms_fshift8ms.sh 1 0 experiment1
 # If you want to start from the beggining, set the first argument to 0.
 # If you want to skip the first stage, set it to 1.

@@ -143,6 +143,7 @@ def main():
         for f in walk_files(src, ext)
     ]
     
+    print('Extracting features...')
     #import pdb;pdb.set_trace() # Breakpoint
     # debug
     #extract_melspec(*fargs_list[0])

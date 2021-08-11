@@ -2,12 +2,12 @@
 
 # Example:
 # ./run_test_whisper_flen64ms_fshift8ms.sh 0 experiment1
-# ./run_test_whisper_flen64ms_fshift8ms.sh 0
 
 db_dir="/misc/raid58/kameoka.hirokazu/db/ATR503Seki/test"
 dataset_name="whisper"
 exp_name=${2}
 #exp_name="experiment1"
+#refine_type="raw"
 refine_type="forward"
 #refine_type="diagonal"
 

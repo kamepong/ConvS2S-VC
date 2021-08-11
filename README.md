@@ -61,6 +61,8 @@ cp -r arctic_4spk_flen64ms_fshift8ms pwg/egs/
 
 ## Main
 
+See shell scripts in `recipes` for examples of training on different datasets.
+
 #### Feature Extraction
 
 To extract the normalized mel-spectrograms from the training utterances, execute:
