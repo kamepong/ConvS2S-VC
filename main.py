@@ -1,3 +1,6 @@
+# Copyright 2021 Hirokazu Kameoka
+# MIT License (https://opensource.org/licenses/MIT)
+
 import numpy as np
 import os
 import argparse
@@ -27,8 +30,7 @@ def main():
     parser.add_argument('--kdim', '-kd', type=int, default=512, help='middle layer dimension of encoders')
     parser.add_argument('--mdim', '-md', type=int, default=512, help='middle layer dimension of decoder')
     parser.add_argument('--hdim', '-hd', type=int, default=32, help='speaker embedding dimension')
-    parser.add_argument('--num_layers', '-nl', type=int, default=4, help='Number of layers in each dilated CNN block')
-    parser.add_argument('--num_blocks', '-nb', type=int, default=2, help='Number of blocks')
+    parser.add_argument('--num_layers', '-nl', type=int, default=8, help='Number of layers in each network')
     parser.add_argument('--lrate', '-lr', default='5e-05', type=float, help='learning rate')
     parser.add_argument('--w_da', '-wd', default='2000.0', type=float, help='regularization weight for DAL')
     parser.add_argument('--pos_weight', '-pw', default='1.0', type=float, help='Weight for positional encoding')
@@ -36,7 +38,6 @@ def main():
     parser.add_argument('--gauss_width_da', '-gda', default='0.3', type=float, help='Width of Gaussian for DAL')
     parser.add_argument('--identity_mapping', '-iml', default=1, type=int, help='{0: not include 1: include} IML')
     parser.add_argument('--reduction_factor', '-rf', default=4, type=int, help='Reduction factor')
-    parser.add_argument('--normtype', '-norm', default='WN', type=str, help='normalization type: CBN, WN')
     parser.add_argument('--multistep', '-ms', default=1, type=int, help='Multistep parameter update')
     parser.add_argument('--resume', '-res', type=int, default=0, help='Checkpoint to resume training')
     parser.add_argument('--model_rootdir', '-mdir', type=str, default='./model/arctic/', help='model file directory')
@@ -59,7 +60,6 @@ def main():
     mdim = args.mdim
     hdim = args.hdim
     num_layers = args.num_layers
-    num_blocks = args.num_blocks
     lrate = args.lrate
     w_da = args.w_da
     pos_weight = args.pos_weight
@@ -67,7 +67,6 @@ def main():
     gauss_width_da = args.gauss_width_da
     identity_mapping = bool(args.identity_mapping)
     reduction_factor = args.reduction_factor
-    normtype = args.normtype
     multistep = bool(args.multistep)
     epochs = args.epochs
     batch_size = args.batch_size
@@ -86,7 +85,6 @@ def main():
         'mdim': mdim,
         'hdim': hdim,
         'num_layers': num_layers,
-        'num_blocks': num_blocks,
         'lrate': lrate,
         'w_da': w_da,
         'pos_weight': pos_weight,
@@ -94,7 +92,6 @@ def main():
         'gauss_width_da': gauss_width_da,
         'identity_mapping': identity_mapping, 
         'reduction_factor': reduction_factor,
-        'normtype': normtype,
         'multistep': multistep, 
         'epochs': epochs,
         'BatchSize': batch_size,
@@ -113,9 +110,9 @@ def main():
 
     #import pdb; pdb.set_trace()
     models = {
-        'enc_src' : net.SrcEncoder1(num_mels*reduction_factor,n_spk,hdim,zdim,kdim,num_layers,num_blocks,normtype),
-        'enc_trg' : net.TrgEncoder1(num_mels*reduction_factor,n_spk,hdim,zdim,kdim,num_layers,num_blocks,normtype),
-        'dec' : net.Decoder1(zdim*2,n_spk,hdim,num_mels*reduction_factor,mdim,num_layers,num_blocks,normtype)
+        'enc_src' : net.SrcEncoder1(num_mels*reduction_factor,n_spk,hdim,zdim,kdim,num_layers,dropout_ratio),
+        'enc_trg' : net.TrgEncoder1(num_mels*reduction_factor,n_spk,hdim,zdim,kdim,num_layers,dropout_ratio),
+        'dec' : net.Decoder1(zdim*2,n_spk,hdim,num_mels*reduction_factor,mdim,num_layers,dropout_ratio)
     }
     models['convs2s'] = net.ConvS2S(models['enc_src'], models['enc_trg'], models['dec'])
 

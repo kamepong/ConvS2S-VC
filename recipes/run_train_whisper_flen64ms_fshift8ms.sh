@@ -1,5 +1,8 @@
 #!/bin/sh
 
+# Copyright 2021 Hirokazu Kameoka
+# MIT License (https://opensource.org/licenses/MIT)
+#
 # Usage:
 # ./run_train_whisper_flen64ms_fshift8ms.sh 1 0 experiment1
 # If you want to start from the beginning, set the first argument to 0.

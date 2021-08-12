@@ -1,5 +1,8 @@
 #!/bin/sh
 
+# Copyright 2021 Hirokazu Kameoka
+# MIT License (https://opensource.org/licenses/MIT)
+#
 # Example:
 # ./run_test_whisper_flen64ms_fshift8ms.sh 0 experiment1
 

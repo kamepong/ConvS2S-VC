@@ -1,3 +1,6 @@
+# Copyright 2021 Hirokazu Kameoka
+# MIT License (https://opensource.org/licenses/MIT)
+
 import os
 import argparse
 import torch
@@ -129,10 +132,8 @@ def main():
     kdim = model_config['kdim']
     hdim = model_config['hdim']
     num_layers = model_config['num_layers']
-    num_blocks = model_config['num_blocks']
     reduction_factor = model_config['reduction_factor']
     pos_weight = model_config['pos_weight']
-    normtype = model_config['normtype']
     refine_type = args.refine_type
 
     stat_filepath = args.stat
@@ -146,9 +147,9 @@ def main():
 
     # Set up main model
     models = {
-        'enc_src' : net.SrcEncoder1(num_mels*reduction_factor,n_spk,hdim,zdim,kdim,num_layers,num_blocks,normtype),
-        'enc_trg' : net.TrgEncoder1(num_mels*reduction_factor,n_spk,hdim,zdim,kdim,num_layers,num_blocks,normtype),
-        'dec' : net.Decoder1(zdim*2,n_spk,hdim,num_mels*reduction_factor,mdim,num_layers,num_blocks,normtype)
+        'enc_src' : net.SrcEncoder1(num_mels*reduction_factor,n_spk,hdim,zdim,kdim,num_layers),
+        'enc_trg' : net.TrgEncoder1(num_mels*reduction_factor,n_spk,hdim,zdim,kdim,num_layers),
+        'dec' : net.Decoder1(zdim*2,n_spk,hdim,num_mels*reduction_factor,mdim,num_layers)
     }
     models['convs2s'] = net.ConvS2S(models['enc_src'], models['enc_trg'], models['dec'])
 
@@ -193,7 +194,7 @@ def main():
                 src_wav_filepath = os.path.join(src_wav_dir, src_wav_filename)
                 src_melspec = audio_transform(src_wav_filepath, melspec_scaler, data_config, device)
 
-                conv_melspec, A, elapsed_time = models['convs2s'].inference(src_melspec, i, j, reduction_factor, 0.0, pos_weight, refine_type)
+                conv_melspec, A, elapsed_time = models['convs2s'].inference(src_melspec, i, j, reduction_factor, pos_weight, refine_type)
                 conv_melspec = conv_melspec.T # n_frames x n_mels
 
                 out_wavpath = os.path.join(args.out,args.experiment_name,'{}2{}'.format(src_spk,trg_spk), src_wav_filename)

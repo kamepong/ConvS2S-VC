@@ -1,3 +1,6 @@
+# Copyright 2021 Hirokazu Kameoka
+# MIT License (https://opensource.org/licenses/MIT)
+
 import numpy as np
 import os
 import logging
@@ -23,7 +26,6 @@ def Train(models, epochs, train_loader, optimizers, model_config, device, model_
         os.makedirs(os.path.dirname(log_path))
     logging.basicConfig(filename=log_path, filemode='w', level=logging.INFO, format=fmt, datefmt=datafmt)
 
-    dr = model_config['dropout_ratio']
     pw = model_config['pos_weight']
     gw = model_config['gauss_width_da']
     rf = model_config['reduction_factor']
@@ -55,12 +57,11 @@ def Train(models, epochs, train_loader, optimizers, model_config, device, model_
                 xin.append(torch.tensor(X_list[s]).to(device, dtype=torch.float))
                 mask.append(torch.tensor(mask_list[s]).to(device, dtype=torch.float))
 
-            logging.info(model_dir)
             if iml:
                 mainloss_mean = 0
                 daloss_mean = 0
                 for s in range(n_spk):
-                    MainLoss, DALoss, A = models['convs2s'].calc_loss(xin[s], xin[s], mask[s], mask[s], s, s, dr, pw, gw, rf)
+                    MainLoss, DALoss, A = models['convs2s'].calc_loss(xin[s], xin[s], mask[s], mask[s], s, s, pw, gw, rf)
                     Loss = MainLoss + w_da * DALoss
 
                     mainloss_mean = mainloss_mean + MainLoss.item()
@@ -97,7 +98,7 @@ def Train(models, epochs, train_loader, optimizers, model_config, device, model_
             for m in range(n_spk_pair):
                 s0 = spk_pair_list[m][0]
                 s1 = spk_pair_list[m][1]
-                MainLoss, DALoss, A = models['convs2s'].calc_loss(xin[s0], xin[s1], mask[s0], mask[s1], s0, s1, dr, pw, gw, rf)
+                MainLoss, DALoss, A = models['convs2s'].calc_loss(xin[s0], xin[s1], mask[s0], mask[s1], s0, s1, pw, gw, rf)
                 Loss = MainLoss + w_da * DALoss
 
                 mainloss_mean = mainloss_mean + MainLoss.item()

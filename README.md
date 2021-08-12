@@ -108,3 +108,10 @@ If you find this work useful for your research, please cite our paper.
 }
 ```
 
+
+
+## Author
+
+Hirokazu Kameoka ([@kamepong](https://github.com/kamepong))
+
+E-mail: kame.hirokazu@gmail.com

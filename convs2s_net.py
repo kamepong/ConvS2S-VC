@@ -1,138 +1,86 @@
+# Copyright 2021 Hirokazu Kameoka
+# MIT License (https://opensource.org/licenses/MIT)
+
 import numpy as np
-import six
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
 import sys
-import scipy
-from scipy import signal
 import time
 
-class DilCausConv1D(nn.Module):
-    def __init__(self, in_ch, out_ch, ks, df, normtype='CBN'):
-        super(DilCausConv1D, self).__init__()
-        self.conv1 = nn.Conv1d(
-            in_ch, out_ch, ks, dilation=df, padding=df*(ks-1))
-        if normtype=='WN':
-            self.conv1 = nn.utils.weight_norm(self.conv1)
+def calc_padding(kernel_size, dilation, causal, stride=1):
+    if causal:
+        padding = (kernel_size-1)*dilation + 1 - stride
+    else:
+        padding = ((kernel_size-1)*dilation + 1 - stride)//2
+    return padding
 
-    def __call__(self, x):
-        xlen = x.shape[2]
-        h = self.conv1(x)
-        h = h[:,:,0:xlen]
-        return h
+class DilCausConv1D(nn.Module):
+    def __init__(self, in_ch, out_ch, ks, df):
+        super(DilCausConv1D, self).__init__()
+        self.padding = calc_padding(ks, df, True)
+        self.conv1 = nn.Conv1d(
+            in_ch, out_ch, ks, dilation=df, padding=0)
+        self.conv1 = nn.utils.weight_norm(self.conv1)
+
+    def __call__(self, input, state=None):
+        if state is None:
+            state = torch.zeros_like(input[:, :, :1]).repeat(1, 1, self.padding)
+        input = torch.cat([state, input], dim=2)
+        output = self.conv1(input)
+        state = input[:, :, -self.padding:]
+        
+        return output, state
 
 class DilConv1D(nn.Module):
-    def __init__(self, in_ch, out_ch, ks, df, normtype='CBN'):
+    def __init__(self, in_ch, out_ch, ks, df):
         super(DilConv1D, self).__init__()
+        self.padding = calc_padding(ks, df, False)
         self.conv1 = nn.Conv1d(
-            in_ch, out_ch, ks, dilation=df, padding=df*(ks-1)//2)
-        if normtype=='WN':
-            self.conv1 = nn.utils.weight_norm(self.conv1)
+            in_ch, out_ch, ks, dilation=df, padding=self.padding)
+        self.conv1 = nn.utils.weight_norm(self.conv1)
 
     def __call__(self, x):
         h = self.conv1(x)
         return h
 
 class DilCausConvGLU1D(nn.Module):
-    def __init__(self, in_ch, out_ch, ks, df, clsnum, normtype='CBN'):
+    def __init__(self, in_ch, out_ch, ks, df):
         super(DilCausConvGLU1D, self).__init__()
+        self.padding = calc_padding(ks, df, True)
         self.conv1 = nn.Conv1d(
-            in_ch, out_ch*2, ks, dilation=df, padding=df*(ks-1))
-        if normtype=='WN':
-            self.conv1 = nn.utils.weight_norm(self.conv1)
-        elif normtype=='CBN':
-            self.norms1 = nn.ModuleList()
-            for j in range(clsnum):
-                self.norms1.append(nn.BatchNorm1d(out_ch*2))
-        self.normtype = normtype
+            in_ch, out_ch*2, ks, dilation=df, padding=0)
+        self.conv1 = nn.utils.weight_norm(self.conv1)
 
-    def __call__(self, x, c):
-        xlen = x.shape[2]
-        h = x
-        
-        h = self.conv1(h)
-        h = h[:,:,0:xlen]
-        if self.normtype=='CBN':
-            h = self.norms1[c](h)
+    def __call__(self, input, state=None):
+        if state is None:
+            state = torch.zeros_like(input[:, :, :1]).repeat(1, 1, self.padding)
+        input = torch.cat([state, input], dim=2)
+        output = self.conv1(input)
+        state = input[:, :, -self.padding:]
                 
-        h_l, h_g = torch.split(h, h.shape[1]//2, dim=1)
-        h = h_l * torch.sigmoid(h_g)     
-        return h
+        h_l, h_g = torch.split(output, output.shape[1]//2, dim=1)
+        output = h_l * torch.sigmoid(h_g)     
+        return output, state
 
-class DilCausConvReLU1D(nn.Module):
-    def __init__(self, in_ch, out_ch, ks, df, normtype='CBN'):
-        super(DilCausConvReLU1D, self).__init__()
-        self.conv1 = nn.Conv1d(
-            in_ch, out_ch, ks,
-            dilation=df, padding=df*(ks-1))
-        if normtype=='WN':
-            self.conv1 = nn.utils.weight_norm(self.conv1)
-        
-    def __call__(self, x):
-        xlen = x.shape[2]
-        h = self.conv1(x)
-        h = h[:,:,0:xlen]
-        h = F.softplus(h, beta=1.0)
-        return h
-    
 class DilConvGLU1D(nn.Module):
-    def __init__(self, in_ch, out_ch, ks, df, clsnum, normtype='CBN'):
+    def __init__(self, in_ch, out_ch, ks, df):
         super(DilConvGLU1D, self).__init__()
+        self.padding = calc_padding(ks, df, False)
         self.conv1 = nn.Conv1d(
-            in_ch, out_ch*2, ks, dilation=df, padding=df*(ks-1)//2)
-        if normtype=='WN':
-            self.conv1 = nn.utils.weight_norm(self.conv1)
-        elif normtype=='CBN':
-            self.norms1 = nn.ModuleList()
-            for j in range(clsnum):
-                self.norms1.append(nn.BatchNorm1d(out_ch*2))
-        self.normtype = normtype
+            in_ch, out_ch*2, ks, dilation=df, padding=self.padding)
+        self.conv1 = nn.utils.weight_norm(self.conv1)
 
-    def __call__(self, x, c):
-        h = x
-        
+    def __call__(self, x):
+        h = x        
         h = self.conv1(h)
-        if self.normtype=='CBN':
-            h = self.norms1[c](h)
-        
         h_l, h_g = torch.split(h, h.shape[1]//2, dim=1)
         h = h_l * torch.sigmoid(h_g)
         
         return h
-
-class DilConvReLU1D(nn.Module):
-    def __init__(self, in_ch, out_ch, ks, df, normtype='CBN'):
-        super(DilConvReLU1D, self).__init__()
-        self.conv1 = nn.Conv1d(
-            in_ch, out_ch, ksize=ks,
-            dilation=df, padding=df*(ks-1)//2)
-        if normtype=='WN':
-            self.conv1 = nn.utils.weight_norm(self.conv1)
-
-    def __call__(self, x):
-        h = self.conv1(x)
-        h = self.bn1(h)
-        h = F.softplus(h, beta=1.0)
-        return h
-    
+   
 def position_encoding(length, n_units):
-    '''
-    # Implementation described in the paper
-    start = 1  # index starts from 1 or 0
-    posi_block = np.arange(
-        start, length + start, dtype='f')[None, None, :]
-    unit_block = np.arange(
-        start, n_units // 2 + start, dtype='f')[None, :, None]
-    rad_block = posi_block / 10000. ** (unit_block / (n_units // 2))
-    sin_block = np.sin(rad_block)
-    cos_block = np.cos(rad_block)
-    position_encoding_block = np.empty((1, n_units, length), 'f')
-    position_encoding_block[:, ::2, :] = sin_block
-    position_encoding_block[:, 1::2, :] = cos_block
-    ''' 
-
     # Implementation in the Google tensor2tensor repo
     channels = n_units
     position = np.arange(length, dtype='f')
@@ -152,134 +100,144 @@ def position_encoding(length, n_units):
     position_encoding_block = np.transpose(signal, (0, 2, 1))
     return position_encoding_block
 
-def xy_concat(x,y):
-    N, aux_ch = y.shape
+def concat_dim1(x,y):
+    num_batch, aux_ch = y.shape
     y0 = torch.unsqueeze(y,2)
-    N, n_ch, n_q = x.shape
-    yy = y0.repeat(1,1,n_q)
+    num_batch, n_ch, n_t = x.shape
+    yy = y0.repeat(1,1,n_t)
     h = torch.cat((x,yy), dim=1)
     return h
 
 class SrcEncoder1(nn.Module):
     # 1D Dilated Non-Causal Convolution
-    def __init__(self, in_ch, clsnum, h_ch, out_ch, mid_ch, num_layers, num_blocks, normtype='CBN'):
+    def __init__(self, in_ch, clsnum, h_ch, out_ch, mid_ch, num_layers=8, dor=0.1):
         super(SrcEncoder1, self).__init__()
         
         self.layer_names = []
         assert num_layers > 1
         self.num_layers = num_layers
-        self.num_blocks = num_blocks
         self.clsnum = clsnum
         
-        self.eb1 = nn.Embedding(clsnum, h_ch)
-        #self.eb1 = nn.utils.weight_norm(self.eb1)
-        self.start1 = DilConv1D(in_ch+h_ch,mid_ch,1,1,normtype)
+        self.eb = nn.Embedding(clsnum, h_ch)
+        #self.eb = nn.utils.weight_norm(self.eb)
+        self.start = DilConv1D(in_ch+h_ch,mid_ch,1,1)
 
+        dilation = [3**(i%4) for i in range(num_layers)]
+        # [1, 3, 9, 27, 1, 3, 9, 27]
         self.glu_blocks = nn.ModuleList()
-        for i in range(num_layers*num_blocks):
-            dilation = 3**(i%num_layers)
-            self.glu_blocks.append(DilConvGLU1D(mid_ch+h_ch,mid_ch,5,dilation,clsnum,normtype))
+        for i in range(num_layers):
+            self.glu_blocks.append(DilConvGLU1D(mid_ch+h_ch,mid_ch,5,dilation[i]))
 
-        self.end1 = DilConv1D(mid_ch+h_ch,out_ch*2,1,1,normtype)
-            
-    def __call__(self, x, c, dor=0.05):
+        self.end = DilConv1D(mid_ch+h_ch,out_ch*2,1,1)
+        self.dropout = nn.Dropout(p=dor)
+        
+    def __call__(self, x, c):
         device = x.device
         N, n_ch, n_t = x.shape
         t = torch.LongTensor(c*np.ones(N)).to(device, dtype=torch.int64)
-        l = self.eb1(t)
+        l = self.eb(t)
         # l.shape: (N, h_ch)
         
-        out = F.dropout(x, p=dor)
-        out = xy_concat(out,l)
-        out = self.start1(out)
+        out = self.dropout(x)
+        out = concat_dim1(out,l)
+        out = self.start(out)
         for i, layer in enumerate(self.glu_blocks):
-            outl = xy_concat(out,l)
-            out = layer(outl,c) + out
-        out = xy_concat(out,l)
-        out = self.end1(out)
+            outl = concat_dim1(out,l)
+            out = layer(outl) + out
+        out = concat_dim1(out,l)
+        out = self.end(out)
         K, V = torch.split(out, out.shape[1]//2, dim=1)
         return K, V
 
 class TrgEncoder1(nn.Module):
     # 1D Dilated Causal Convolution
-    def __init__(self, in_ch, clsnum, h_ch, out_ch, mid_ch, num_layers, num_blocks, normtype='CBN'):
+    def __init__(self, in_ch, clsnum, h_ch, out_ch, mid_ch, num_layers=8, dor=0.1):
         super(TrgEncoder1, self).__init__()
         
         self.layer_names = []
         assert num_layers > 1
         self.num_layers = num_layers
-        self.num_blocks = num_blocks
         self.clsnum = clsnum
         
-        self.eb1 = nn.Embedding(clsnum, h_ch)
-        #self.eb1 = nn.utils.weight_norm(self.eb1)
-        self.start1 = DilCausConv1D(in_ch+h_ch,mid_ch,1,1,normtype)
+        self.eb = nn.Embedding(clsnum, h_ch)
+        #self.eb = nn.utils.weight_norm(self.eb)
+        self.start = DilConv1D(in_ch+h_ch,mid_ch,1,1)
 
+        dilation = [3**(i%4) for i in range(num_layers)]
+        # [1, 3, 9, 27, 1, 3, 9, 27]
         self.glu_blocks = nn.ModuleList()
-        for i in range(num_layers*num_blocks):
-            dilation = 3**(i%num_layers)
-            self.glu_blocks.append(DilCausConvGLU1D(mid_ch+h_ch,mid_ch,3,dilation,clsnum,normtype))
+        for i in range(num_layers):
+            self.glu_blocks.append(DilCausConvGLU1D(mid_ch+h_ch,mid_ch,5,dilation[i]))
 
-        self.end1 = DilCausConv1D(mid_ch+h_ch,out_ch,1,1,normtype)
+        self.end = DilConv1D(mid_ch+h_ch,out_ch,1,1)
+        self.dropout = nn.Dropout(p=dor)
             
-    def __call__(self, x, c, dor=0.05):
+    def __call__(self, x, c, state=None):
+        if state is None:
+            state = [None]*self.num_layers
         device = x.device
         N, n_ch, n_t = x.shape
         t = torch.LongTensor(c*np.ones(N)).to(device, dtype=torch.int64)
-        l = self.eb1(t)
+        l = self.eb(t)
         # l.shape: (N, h_ch)
         
-        out = F.dropout(x, p=dor)
-        out = xy_concat(out,l)
-        out = self.start1(out)
+        out = self.dropout(x)
+        out = concat_dim1(out,l)
+        out = self.start(out)
 
         for i, layer in enumerate(self.glu_blocks):
-            outl = xy_concat(out,l)
-            out = layer(outl,c) + out
-        out = xy_concat(out,l)
-        Q = self.end1(out)
-        return Q
+            outl = concat_dim1(out,l)
+            _out, _state = layer(outl,state=state.pop(0))
+            state += [_state]
+            out = _out + out
+        out = concat_dim1(out,l)
+        Q = self.end(out)
+        return Q, state
 
 class Decoder1(nn.Module):
     # 1D Dilated Causal Convolution
-    def __init__(self, in_ch, clsnum, h_ch, out_ch, mid_ch, num_layers, num_blocks, normtype='CBN'):
+    def __init__(self, in_ch, clsnum, h_ch, out_ch, mid_ch, num_layers=8, dor=0.1):
         super(Decoder1, self).__init__()
         
         self.layer_names = []
         assert num_layers > 1
         self.num_layers = num_layers
-        self.num_blocks = num_blocks
 
-        self.eb1 = nn.Embedding(clsnum, h_ch)
-        #self.eb1 = nn.utils.weight_norm(self.eb1)
-        self.start1 = DilCausConv1D(in_ch+h_ch,mid_ch,1,1,normtype)
+        self.eb = nn.Embedding(clsnum, h_ch)
+        #self.eb = nn.utils.weight_norm(self.eb)
+        self.start = DilConv1D(in_ch+h_ch,mid_ch,1,1)
 
+        dilation = [3**(i%4) for i in range(num_layers)]
+        # [1, 3, 9, 27, 1, 3, 9, 27]
         self.glu_blocks = nn.ModuleList()
-        for i in range(num_layers*num_blocks):
-            dilation = 3**(i%num_layers)
-            self.glu_blocks.append(DilCausConvGLU1D(mid_ch+h_ch,mid_ch,3,dilation,clsnum,normtype))
+        for i in range(num_layers):
+            self.glu_blocks.append(DilCausConvGLU1D(mid_ch+h_ch,mid_ch,3,dilation[i]))
 
-        self.end1 = DilCausConv1D(mid_ch+h_ch,out_ch,1,1,normtype)
+        self.end = DilConv1D(mid_ch+h_ch,out_ch,1,1)
+        self.dropout = nn.Dropout(p=dor)
 
-    def __call__(self, x, c, rf, dor=0.05):
+    def __call__(self, x, c, state=None):
+        if state is None:
+            state = [None]*self.num_layers
         device = x.device
         N, n_ch, n_t = x.shape
         t = torch.LongTensor(c*np.ones(N)).to(device, dtype=torch.int64)
-        l = self.eb1(t)
+        l = self.eb(t)
         # l.shape: (N, h_ch)
         
-        out = F.dropout(x, p=dor)
-
-        out = xy_concat(out,l)
-        out = self.start1(out)
+        out = self.dropout(x)
+        out = concat_dim1(out,l)
+        out = self.start(out)
 
         for i, layer in enumerate(self.glu_blocks):
-            outl = xy_concat(out,l)
-            out = layer(outl,c) + out
-        out = xy_concat(out,l)
-        y = self.end1(out)
+            outl = concat_dim1(out,l)
+            _out, _state = layer(outl,state=state.pop(0))
+            state += [_state]
+            out = _out + out
+        out = concat_dim1(out,l)
+        y = self.end(out)
 
-        return y
+        return y, state
 
 def gaussdis(N,mu,sigma):
     nN = np.arange(0,N)
@@ -326,7 +284,7 @@ class ConvS2S():
         self.enc_trg = enc_trg
         self.dec = dec
 
-    def calc_loss(self, x_s, x_t, m_s, m_t, l_s, l_t, dor=0.1, pos_weight=1.0,
+    def calc_loss(self, x_s, x_t, m_s, m_t, l_s, l_t, pos_weight=1.0,
                           gauss_width_da=0.3, reduction_factor = 3):
         # L1 loss with position encoding
         device = x_s.device
@@ -368,13 +326,11 @@ class ConvS2S():
         assert m_s.shape[2] == N
         assert m_t.shape[2] == T
         
-        #import pdb;pdb.set_trace() # Breakpoint
-        
-        K_s, V_s = self.enc_src(in_s, l_s, dor)
+        K_s, V_s = self.enc_src(in_s, l_s)
 
         # K_s.shape: 1 x d x N
         d = K_s.shape[1]
-        Q_t = self.enc_trg(in_t, l_t, dor)
+        Q_t, _ = self.enc_trg(in_t, l_t)
         # Q_t.shape: 1 x d x T
 
         # Attention matrix
@@ -387,7 +343,7 @@ class ConvS2S():
 
         R = torch.cat((R,F.dropout(Q_t, p=0.9)), dim=1)
 
-        y = self.dec(R,l_t,rf,dor)
+        y, _ = self.dec(R,l_t)
         #import pdb;pdb.set_trace() # Breakpoint
 
         # Main Loss
@@ -417,8 +373,7 @@ class ConvS2S():
         
         return MainLoss, DALoss, A_np
 
-    def inference(self, x_s, l_s, l_t, rf, 
-                  dor=0.0, pos_weight=1.0, refine='raw'):
+    def inference(self, x_s, l_s, l_t, rf, pos_weight=1.0, refine='raw'):
         start = time.time()
         
         device = x_s.device
@@ -442,62 +397,69 @@ class ConvS2S():
         self.dec.eval()
 
         with torch.no_grad():
-            K, V = self.enc_src(in_s,l_s,dor)
+            K, V = self.enc_src(in_s,l_s)
         d = K.shape[1]
         
         if refine == 'raw' or refine == None:
             # Raw attention
             T = round(N*2.0)
+            in_t = x_t
+
+            pos_t = position_encoding(T, D)
+            pos_t = torch.tensor(pos_t).to(device, dtype=torch.float)
+            pos_t = pos_t.repeat(BatchSize,1,1)
+
+            state_out_enc_trg = None
+            state_out_dec = None
             for t in range(0,T):
 
-                pos_t = position_encoding(x_t.shape[2], D)
-                pos_t = torch.tensor(pos_t).to(device, dtype=torch.float)
-
-                in_t = x_t
-                in_t[:,0:pos_t.shape[1],:] = in_t[:,0:pos_t.shape[1],:] + pos_t/scale_emb * pos_weight
+                in_t[:,0:pos_t.shape[1],:] = in_t[:,0:pos_t.shape[1],:] + pos_t[:,:,t:t+1]/scale_emb * pos_weight
                 
                 with torch.no_grad():
-                    Q = self.enc_trg(in_t, l_t, dor)
+                    Q, state_out_enc_trg = self.enc_trg(in_t, l_t, state_out_enc_trg)
                     # Scaled dot-product attention
                     A = F.softmax(torch.matmul(K.permute(0,2,1), Q)/math.sqrt(d), dim=1)
                     R = torch.matmul(V,A)
                     R = torch.cat((R,F.dropout(Q, p=0.0, training=False)), dim=1)
-                    y = self.dec(R,l_t,rf,dor)
-                    Zero = np.zeros((1,D,1))
-                    zero = torch.tensor(Zero).to(device, dtype=torch.float)
-                    x_t = torch.cat((zero,y), dim=2)
+                    y, state_out_dec = self.dec(R,l_t, state_out_dec)
+                    y_concat = y if t == 0 else torch.cat((y_concat,y), dim=2)
+                    A_concat = A if t == 0 else torch.cat((A_concat,A), dim=2)
+                    in_t = y
 
             elapsed_time = time.time() - start
-            amod = A.clone()
-            A_np = A[0,:,:].detach().cpu().clone().numpy()**0.3
+            A_np = A_concat[0,:,:].detach().cpu().clone().numpy()**0.3
             path = mydtw_fromDistMat(1.0-A_np,w=100,p=0.1)
 
             end_of_frame = path[1][-1]
             #end_of_frame = min(path[1][-1]+20, T)
+            #end_of_frame = T
                 
         elif refine == 'diagonal':
             # Exactly diagonal attention (no time-warping)
             T = N
             end_of_frame = T
+            in_t = x_t
 
+            pos_t = position_encoding(T, D)
+            pos_t = torch.tensor(pos_t).to(device, dtype=torch.float)
+            pos_t = pos_t.repeat(BatchSize,1,1)
+
+            state_out_enc_trg = None
+            state_out_dec = None
             for t in range(0,T):
-                pos_t = position_encoding(x_t.shape[2], D)
-                pos_t = torch.tensor(pos_t).to(device, dtype=torch.float)
 
-                in_t = x_t
-                in_t[:,0:pos_t.shape[1],:] = in_t[:,0:pos_t.shape[1],:] + pos_t/scale_emb * pos_weight
+                in_t[:,0:pos_t.shape[1],:] = in_t[:,0:pos_t.shape[1],:] + pos_t[:,:,t:t+1]/scale_emb * pos_weight
 
                 with torch.no_grad():
-                    Q = self.enc_trg(in_t, l_t, dor)
-                    R = torch.cat((V[:,:,0:t+1],F.dropout(Q, p=0.0, training=False)), dim=1)
-                    y = self.dec(R,l_t,rf,dor)
-                    Zero = np.zeros((1,D,1))
-                    zero = torch.tensor(Zero).to(device, dtype=torch.float)
-                    x_t = torch.cat((zero,y), dim=2)
+                    Q, state_out_enc_trg = self.enc_trg(in_t, l_t, state_out_enc_trg)
+                    R = torch.cat((V[:,:,t:t+1],F.dropout(Q, p=0.0, training=False)), dim=1)
+                    y, state_out_dec = self.dec(R,l_t, state_out_dec)
+                    y_concat = y if t == 0 else torch.cat((y_concat,y), dim=2)
+                    in_t = y
 
             elapsed_time = time.time() - start
-            Amod = np.eye(N).reshape(1,N,N)
-            amod = torch.tensor(Amod).to(device, dtype=torch.float)
+            A_concat = np.eye(N).reshape(1,N,N)
+            A_concat = torch.tensor(A_concat).to(device, dtype=torch.float)
             path = [np.arange(N), np.arange(N)]
 
         if refine == 'forward':
@@ -506,35 +468,24 @@ class ConvS2S():
             n_argmax = 0
             y_samples = np.array([0])
             x_samples = np.array([0])
+            in_t = x_t
+
+            pos_t = position_encoding(T, D)
+            pos_t = torch.tensor(pos_t).to(device, dtype=torch.float)
+            pos_t = pos_t.repeat(BatchSize,1,1)
+
+            state_out_enc_trg = None
+            state_out_dec = None
             for t in range(0,T):
 
-                pos_t = position_encoding(x_t.shape[2], D)
-                pos_t = torch.tensor(pos_t).to(device, dtype=torch.float)
-
-                in_t = x_t
-                in_t[:,0:pos_t.shape[1],:] = in_t[:,0:pos_t.shape[1],:] + pos_t/scale_emb * pos_weight
+                in_t[:,0:pos_t.shape[1],:] = in_t[:,0:pos_t.shape[1],:] + pos_t[:,:,t:t+1]/scale_emb * pos_weight
 
                 with torch.no_grad():
-                    Q = self.enc_trg(in_t, l_t, dor)
+                    Q, state_out_enc_trg = self.enc_trg(in_t, l_t, state_out_enc_trg)
                     # Scaled dot-product attention
                     A = F.softmax(torch.matmul(K.permute(0,2,1), Q)/math.sqrt(d), dim=1)
-                    
-                    # Scaled dot-product attention
-                    A = F.softmax(torch.matmul(K.permute(0,2,1), Q)/math.sqrt(d), dim=1)
-                    if t == 0:
-                        A_concat = A.clone()
-                    else:
-                        A_last = A[:,:,t:t+1].detach().cpu().clone().numpy()
-                        A_last[0,0:max(n_argmax-20//rf,0),0] = 0
-                        A_last[0,min(n_argmax+40//rf,N-1):,0] = 0
-                        A_last = (np.maximum(A_last,1e-10))/np.sum(np.maximum(A_last,1e-10))
-                        a_last = torch.tensor(A_last).to(device, dtype=torch.float)
-                        A_concat = torch.cat((A_concat, a_last), dim=2)
-                    
-                    amod = A_concat.clone()
-                    A = A_concat.clone()
-                    A_np = A[0,:,t].detach().cpu().clone().numpy()
 
+                    A_np = A.detach().cpu().clone().numpy()
                     # Prediction of attended time point
                     if t==0:
                         n_argmax_tmp = localpeak(A_np,n_argmax,5.0)[0]
@@ -548,36 +499,31 @@ class ConvS2S():
                                  /(max(np.std(x_samples),1e-10)**2))
                         n_argmax = int(round(slope*(t+1)))
 
-                    #import pdb;pdb.set_trace() # Breakpoint
-
-                    R = torch.matmul(V,A)
+                    A_np[0,0:max(n_argmax-20//rf,0),0] = 0
+                    A_np[0,min(n_argmax+40//rf,N-1):,0] = 0
+                    A_np = (np.maximum(A_np,1e-10))/np.sum(np.maximum(A_np,1e-10))
+                    A_ = torch.tensor(A_np).to(device, dtype=torch.float)
+                    A_concat = A_ if t == 0 else torch.cat((A_concat, A_), dim=2)
+                    R = torch.matmul(V,A_)
                     R = torch.cat((R,F.dropout(Q, p=0.0, training=False)), dim=1)
-                    y = self.dec(R,l_t,rf,dor)
-                    
-                    Zero = np.zeros((1,D,1))
-                    zero = torch.tensor(Zero).to(device, dtype=torch.float)
-                    x_t = torch.cat((zero,y), dim=2)
+                    y, state_out_dec = self.dec(R,l_t,state_out_dec)
+                    y_concat = y if t == 0 else torch.cat((y_concat,y), dim=2)
+
+                    in_t = y
 
             elapsed_time = time.time() - start
-            A_tmp = A[0,:,:].detach().cpu().clone().numpy()**0.3
+            A_tmp = A_concat[0,:,:].detach().cpu().clone().numpy()**0.3
             #import pdb;pdb.set_trace() # Breakpoint
             path = mydtw_fromDistMat(1.0-A_tmp,w=100,p=0.1)
             end_of_frame = path[1][-1]
             #end_of_frame = T
             
-        A = amod[:,:,0:end_of_frame].clone()
-        A_out = A.detach().cpu().clone().numpy()
-        #import pdb;pdb.set_trace() # Breakpoint
-        with torch.no_grad():
-            R = torch.matmul(V,A)
-            R = torch.cat((R,F.dropout(Q[:,:,0:end_of_frame], p=0.0, training=False)), dim=1)
-            y = self.dec(R,l_t,rf,dor)
+        A_out = A_concat[:,:,0:end_of_frame].clone()
+        A_out = A_out.detach().cpu().clone().numpy()
 
-        #melspec_conv = expand(y[:,0:D,:],rf).detach().cpu().clone().numpy()
-        melspec_conv = expand(y[:,0:D,0:end_of_frame],rf).detach().cpu().clone().numpy()
+        melspec_conv = expand(y_concat[:,0:D,0:end_of_frame],rf).detach().cpu().clone().numpy()
         melspec_conv = melspec_conv[0,:,:]
 
-        #import pdb;pdb.set_trace() # Breakpoint
         return melspec_conv, A_out, elapsed_time
 
 def mydtw_fromDistMat(D0, w=np.inf, p=0.0):
