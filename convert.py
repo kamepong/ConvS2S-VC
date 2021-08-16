@@ -1,5 +1,4 @@
 # Copyright 2021 Hirokazu Kameoka
-# MIT License (https://opensource.org/licenses/MIT)
 
 import os
 import argparse
@@ -15,7 +14,7 @@ import librosa
 import soundfile as sf
 from sklearn.preprocessing import StandardScaler
 
-import convs2s_net as net
+import s2s_net as net
 from extract_features import logmelfilterbank
 
 from pwg.parallel_wavegan.utils import load_model
@@ -91,7 +90,7 @@ def synthesis(melspec, pwg, pwg_config, savepath, device):
     sf.write(savepath, x.detach().cpu().clone().numpy(), pwg_config["sampling_rate"], "PCM_16")
 
 def main():
-    parser = argparse.ArgumentParser(description='ACVAE-VC')
+    parser = argparse.ArgumentParser(description='ConvS2S-VC')
     parser.add_argument('--gpu', '-g', type=int, default=-1, help='GPU ID (negative value indicates CPU)')
     parser.add_argument('-i', '--input', type=str, default='/misc/raid58/kameoka.hirokazu/python/db/arctic/wav/test',
                         help='root data folder that contains the wav files of input speech')
@@ -146,14 +145,15 @@ def main():
         print('Stat file not found.')
 
     # Set up main model
+    enc = net.Encoder1(num_mels*reduction_factor,n_spk,hdim,zdim,kdim,num_layers)
+    dec = net.Decoder1(num_mels*reduction_factor,n_spk,hdim,num_mels*reduction_factor,zdim,mdim,num_layers,num_blocks=1)
     models = {
-        'enc_src' : net.SrcEncoder1(num_mels*reduction_factor,n_spk,hdim,zdim,kdim,num_layers),
-        'enc_trg' : net.TrgEncoder1(num_mels*reduction_factor,n_spk,hdim,zdim,kdim,num_layers),
-        'dec' : net.Decoder1(zdim*2,n_spk,hdim,num_mels*reduction_factor,mdim,num_layers)
+        'enc' : enc,
+        'dec' : dec
     }
-    models['convs2s'] = net.ConvS2S(models['enc_src'], models['enc_trg'], models['dec'])
+    models['s2s'] = net.S2S(models['enc'], models['dec'])
 
-    for tag in ['enc_src', 'enc_trg', 'dec']:
+    for tag in ['enc', 'dec']:
         model_dir = os.path.join(args.model_rootdir,args.experiment_name)
         mfilename = find_newest_model_file(model_dir, tag)
         path = os.path.join(args.model_rootdir,args.experiment_name,mfilename)
@@ -162,7 +162,7 @@ def main():
             models[tag].load_state_dict(checkpoint['model_state_dict'])
             print('{}: {}'.format(tag, mfilename))
 
-    for tag in ['enc_src', 'enc_trg', 'dec']:
+    for tag in ['enc', 'dec']:
         models[tag].to(device).eval()
 
     # Set up PWG
@@ -194,10 +194,10 @@ def main():
                 src_wav_filepath = os.path.join(src_wav_dir, src_wav_filename)
                 src_melspec = audio_transform(src_wav_filepath, melspec_scaler, data_config, device)
 
-                conv_melspec, A, elapsed_time = models['convs2s'].inference(src_melspec, i, j, reduction_factor, pos_weight, refine_type)
+                conv_melspec, A, elapsed_time = models['s2s'].inference(src_melspec, i, j, reduction_factor, pos_weight, refine_type)
                 conv_melspec = conv_melspec.T # n_frames x n_mels
 
-                out_wavpath = os.path.join(args.out,args.experiment_name,'{}2{}'.format(src_spk,trg_spk), src_wav_filename)
+                out_wavpath = os.path.join(args.out,args.experiment_name,refine_type,'{}2{}'.format(src_spk,trg_spk), src_wav_filename)
                 synthesis(conv_melspec, pwg, pwg_config, out_wavpath, device)
 
 

@@ -1,5 +1,4 @@
 # Copyright 2021 Hirokazu Kameoka
-# MIT License (https://opensource.org/licenses/MIT)
 
 import argparse
 import joblib
