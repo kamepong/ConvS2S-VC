@@ -77,7 +77,7 @@ python train.py [-g gpu] [-exp exp_name] ...
 ```
 
 - Options:
-  - -gpu: GPU device# ("-1" for CPU)
+  - -g: GPU device# ("-1" for CPU)
   - -exp: Experiment name (e.g., "conv_exp1")
 
 To monitor the training process, use tensorboard:
