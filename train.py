@@ -13,7 +13,8 @@ from torch.utils.tensorboard import SummaryWriter
 from torch.utils.data import DataLoader
 
 from dataset import MultiDomain_Dataset, collate_fn
-import s2s_net as net
+import convs2s_net as net
+#from train import Train
 
 def makedirs_if_not_exists(dir):
     if not os.path.exists(dir):
@@ -50,7 +51,7 @@ def Train(models, epochs, train_loader, optimizers, model_config, device, model_
     if not os.path.exists(model_dir):
         os.makedirs(model_dir)
 
-    for tag in ['enc', 'dec']:
+    for tag in ['enc_src', 'enc_trg', 'dec']:
         checkpointpath = os.path.join(model_dir, '{}.{}.pt'.format(resume,tag))
         if os.path.exists(checkpointpath):
             checkpoint = torch.load(checkpointpath, map_location=device)
@@ -76,14 +77,14 @@ def Train(models, epochs, train_loader, optimizers, model_config, device, model_
                 mainloss_mean = 0
                 daloss_mean = 0
                 for s in range(n_spk):
-                    MainLoss, DALoss, A = models['s2s'].calc_loss(xin[s], xin[s], mask[s], mask[s], s, s, pw, gw, rf)
+                    MainLoss, DALoss, A = models['convs2s'].calc_loss(xin[s], xin[s], mask[s], mask[s], s, s, pw, gw, rf)
                     Loss = MainLoss + w_da * DALoss
 
                     mainloss_mean = mainloss_mean + MainLoss.item()
                     daloss_mean = daloss_mean + DALoss.item()
 
                     if multistep:
-                        for tag in ['enc']:
+                        for tag in ['enc_src', 'enc_trg']:
                             models[tag].zero_grad()
                             Loss.backward(retain_graph=True)
                             optimizers[tag].step()
@@ -93,10 +94,10 @@ def Train(models, epochs, train_loader, optimizers, model_config, device, model_
                             optimizers[tag].step()
 
                     else:
-                        for tag in ['enc', 'dec']:
+                        for tag in ['enc_src', 'enc_trg', 'dec']:
                             models[tag].zero_grad()
                         Loss.backward()
-                        for tag in ['enc', 'dec']:
+                        for tag in ['enc_src', 'enc_trg', 'dec']:
                             optimizers[tag].step()
 
                 mainloss_mean = mainloss_mean/n_spk
@@ -115,14 +116,14 @@ def Train(models, epochs, train_loader, optimizers, model_config, device, model_
             for m in range(n_spk_pair):
                 s0 = spk_pair_list[m][0]
                 s1 = spk_pair_list[m][1]
-                MainLoss, DALoss, A = models['s2s'].calc_loss(xin[s0], xin[s1], mask[s0], mask[s1], s0, s1, pw, gw, rf)
+                MainLoss, DALoss, A = models['convs2s'].calc_loss(xin[s0], xin[s1], mask[s0], mask[s1], s0, s1, pw, gw, rf)
                 Loss = MainLoss + w_da * DALoss
 
                 mainloss_mean = mainloss_mean + MainLoss.item()
                 daloss_mean = daloss_mean + DALoss.item()
 
                 if multistep:
-                    for tag in ['enc']:
+                    for tag in ['enc_src', 'enc_trg']:
                         models[tag].zero_grad()
                         Loss.backward(retain_graph=True)
                         optimizers[tag].step()
@@ -132,10 +133,10 @@ def Train(models, epochs, train_loader, optimizers, model_config, device, model_
                         optimizers[tag].step()
 
                 else:
-                    for tag in ['enc', 'dec']:
+                    for tag in ['enc_src', 'enc_trg', 'dec']:
                         models[tag].zero_grad()
                     Loss.backward()
-                    for tag in ['enc', 'dec']:
+                    for tag in ['enc_src', 'enc_trg', 'dec']:
                         optimizers[tag].step()
 
             mainloss_mean = mainloss_mean/n_spk_pair
@@ -149,7 +150,7 @@ def Train(models, epochs, train_loader, optimizers, model_config, device, model_
             b += 1
 
         if epoch % snapshot == 0:
-            for tag in ['enc', 'dec']:
+            for tag in ['enc_src', 'enc_trg', 'dec']:
                 #print('save {} at {} epoch'.format(tag, epoch))
                 torch.save({'epoch': epoch,
                             'model_state_dict': models[tag].state_dict(),
@@ -194,7 +195,7 @@ def main():
     if device.type == 'cuda':
         torch.cuda.set_device(device)
 
-    # Configuration for ConvS2S model
+    # Configuration for ConvS2S
     num_mels = args.num_mels
     zdim = args.zdim
     kdim = args.kdim
@@ -242,36 +243,36 @@ def main():
 
     model_dir = os.path.join(args.model_rootdir, args.experiment_name)
     makedirs_if_not_exists(model_dir)
-    log_path = os.path.join(args.log_dir, args.experiment_name,'train_{}.log'.format(args.experiment_name))
+    log_path = os.path.join(args.log_dir, args.experiment_name, 'train_{}.log'.format(args.experiment_name))
     
     # Save configuration as a json file
     config_path = os.path.join(model_dir, 'model_config.json')
     with open(config_path, 'w') as outfile:
         json.dump(model_config, outfile, indent=4)
 
-    enc = net.Encoder1(num_mels*reduction_factor,n_spk,hdim,zdim,kdim,num_layers,dor=dropout_ratio)
-    dec = net.Decoder1(num_mels*reduction_factor,n_spk,hdim,num_mels*reduction_factor,zdim,mdim,num_layers,num_blocks=1,dor=dropout_ratio)
     models = {
-        'enc' : enc,
-        'dec' : dec
+        'enc_src' : net.SrcEncoder1(num_mels*reduction_factor,n_spk,hdim,zdim,kdim,num_layers,dropout_ratio),
+        'enc_trg' : net.TrgEncoder1(num_mels*reduction_factor,n_spk,hdim,zdim,kdim,num_layers,dropout_ratio),
+        'dec' : net.Decoder1(zdim*2,n_spk,hdim,num_mels*reduction_factor,mdim,num_layers,dropout_ratio)
     }
-    models['s2s'] = net.S2S(models['enc'], models['dec'])
+    models['convs2s'] = net.ConvS2S(models['enc_src'], models['enc_trg'], models['dec'])
 
     optimizers = {
-        'enc' : optim.Adam(models['enc'].parameters(), lr=lrate, betas=(0.9,0.999)),
+        'enc_src' : optim.Adam(models['enc_src'].parameters(), lr=lrate, betas=(0.9,0.999)),
+        'enc_trg' : optim.Adam(models['enc_trg'].parameters(), lr=lrate, betas=(0.9,0.999)),
         'dec' : optim.Adam(models['dec'].parameters(), lr=lrate, betas=(0.9,0.999))
     }
 
-    for tag in ['enc', 'dec']:
+    for tag in ['enc_src', 'enc_trg', 'dec']:
         models[tag].to(device).train(mode=True)
 
     train_dataset = MultiDomain_Dataset(*melspec_dirs)
     train_loader = DataLoader(train_dataset,
                               batch_size=batch_size,
-                              shuffle=False,
+                              shuffle=True,
                               num_workers=0,
                               #num_workers=os.cpu_count(),
-                              drop_last=False,
+                              drop_last=True,
                               collate_fn=collate_fn)
     Train(models, epochs, train_loader, optimizers, model_config, device, model_dir, log_path, snapshot, resume)
 

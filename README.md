@@ -1,8 +1,8 @@
 # ConvS2S-VC
 
-This repository provides an official PyTorch implementation for [ConvS2S-VC](https://arxiv.org/abs/2104.06900).
+This repository provides an official PyTorch implementation for [ConvS2S-VC](http://www.kecl.ntt.co.jp/people/kameoka.hirokazu/Demos/convs2s-vc2/index.html).
 
-ConvS2S-VC uses a fully convolutional sequence-to-sequence (S2S) model to learn mappings between the mel-spectrograms of source and target speech, and [Parallel WaveGAN](https://github.com/kan-bayashi/ParallelWaveGAN) to generate a waveform from the converted mel-spectrogram. 
+ConvS2S-VC uses a fully convolutional sequence-to-sequence (ConvS2S) model to learn mappings between the mel-spectrograms of source and target speech, and [Parallel WaveGAN](https://github.com/kan-bayashi/ParallelWaveGAN) to generate a waveform from the converted mel-spectrogram. 
 
 Audio samples are available [here](http://www.kecl.ntt.co.jp/people/kameoka.hirokazu/Demos/convs2s-vc2/index.html).
 
@@ -13,10 +13,10 @@ Audio samples are available [here](http://www.kecl.ntt.co.jp/people/kameoka.hiro
 
 
 
-## Papers
+## Paper
 
 - [Hirokazu Kameoka](http://www.kecl.ntt.co.jp/people/kameoka.hirokazu/index-e.html), [Kou Tanaka](http://www.kecl.ntt.co.jp/people/tanaka.ko/index.html), [Takuhiro Kaneko](http://www.kecl.ntt.co.jp/people/kaneko.takuhiro/index.html), "**FastS2S-VC: Streaming Non-Autoregressive Sequence-to-Sequence Voice Conversion**," arXiv:2104.06900 [cs.SD], 2021. [**[Paper]**](https://arxiv.org/abs/2104.06900) 
-  
+
 - [Hirokazu Kameoka](http://www.kecl.ntt.co.jp/people/kameoka.hirokazu/index-e.html), [Kou Tanaka](http://www.kecl.ntt.co.jp/people/tanaka.ko/index.html), Damian Kwasny, [Takuhiro Kaneko](http://www.kecl.ntt.co.jp/people/kaneko.takuhiro/index.html), Nobukatsu Hojo, "**ConvS2S-VC: Fully Convolutional Sequence-to-Sequence Voice Conversion**," *IEEE/ACM Transactions on Audio, Speech, and Language Processing*, vol. 28, pp. 1849-1863, Jun. 2020. [**[Paper]**](https://ieeexplore.ieee.org/document/9113442) 
 
 
@@ -73,11 +73,12 @@ python normalize_features.py
 To train the model, execute:
 
 ```bash
-python train.py [-g gpu] [-exp exp_name] ...
+python train.py [-g gpu] [-exp exp_name]
 ```
 
 - Options:
   - -g: GPU device# ("-1" for CPU)
+  - -arc: Architecture type ("conv", "rnn", or "trans")
   - -exp: Experiment name (e.g., "conv_exp1")
 
 To monitor the training process, use tensorboard:
@@ -86,14 +87,12 @@ To monitor the training process, use tensorboard:
 tensorboard [--logdir log_path]
 ```
 
-
-
 #### Test
 
 To perform conversion, execute:
 
 ```bash
-python convert.py [-g gpu] [-exp exp_name] ...
+python convert.py [-g gpu] [-exp exp_name]
 ```
 
 

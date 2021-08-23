@@ -3,7 +3,6 @@
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 def calc_padding(kernel_size, dilation, causal, stride=1):
     if causal:
@@ -11,15 +10,6 @@ def calc_padding(kernel_size, dilation, causal, stride=1):
     else:
         padding = ((kernel_size-1)*dilation + 1 - stride)//2
     return padding
-
-class LinearWN(torch.nn.Module):
-    def __init__(self, in_dim, out_dim, bias=True):
-        super(LinearWN, self).__init__()
-        self.linear_layer = torch.nn.Linear(in_dim, out_dim, bias=bias)
-        self.linear_layer = nn.utils.weight_norm(self.linear_layer)
-
-    def forward(self, x):
-        return self.linear_layer(x)
 
 class DilCausConv1D(nn.Module):
     def __init__(self, in_ch, out_ch, ks, df):
@@ -84,7 +74,7 @@ class DilConvGLU1D(nn.Module):
         h = h_l * torch.sigmoid(h_g)
         
         return h
-
+   
 def position_encoding(length, n_units):
     # Implementation in the Google tensor2tensor repo
     channels = n_units
@@ -99,6 +89,7 @@ def position_encoding(length, n_units):
     signal = np.concatenate(
         [np.sin(scaled_time), np.cos(scaled_time)], axis=1)
 
+    #import pdb;pdb.set_trace() # Breakpoint
     signal = np.expand_dims(signal,axis=0)
     #signal = np.reshape(signal, [1, length, channels])
     position_encoding_block = np.transpose(signal, (0, 2, 1))
@@ -110,16 +101,4 @@ def concat_dim1(x,y):
     num_batch, n_ch, n_t = x.shape
     yy = y0.repeat(1,1,n_t)
     h = torch.cat((x,yy), dim=1)
-    return h
-
-def concat_dim2(x,y):
-    num_batch, aux_ch = y.shape
-    if torch.Tensor.dim(x) == 3:
-        y0 = torch.unsqueeze(y,1) # (num_batch, 1, aux_ch)
-        num_batch, n_frames, n_ch = x.shape
-        yy = y0.repeat(1,n_frames,1)
-        h = torch.cat((x,yy), dim=2)
-    elif torch.Tensor.dim(x) == 2:
-        num_batch, n_ch = x.shape
-        h = torch.cat((x,yy), dim=1)
     return h

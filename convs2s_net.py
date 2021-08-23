@@ -4,16 +4,14 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import math
-import sys
 import time
 
 import module as md
 
-class Encoder1(nn.Module):
+class SrcEncoder1(nn.Module):
     # 1D Dilated Non-Causal Convolution
     def __init__(self, in_ch, clsnum, h_ch, out_ch, mid_ch, num_layers=8, dor=0.1):
-        super(Encoder1, self).__init__()
+        super(SrcEncoder1, self).__init__()
         
         self.layer_names = []
         assert num_layers > 1
@@ -47,14 +45,14 @@ class Encoder1(nn.Module):
             outl = md.concat_dim1(out,l)
             out = layer(outl) + out
         out = md.concat_dim1(out,l)
-        Z = self.end(out)
-        #K, V = torch.split(Z, Z.shape[1]//2, dim=1)
-        return Z
+        out = self.end(out)
+        K, V = torch.split(out, out.shape[1]//2, dim=1)
+        return K, V
 
-class PreDecoder1(nn.Module):
+class TrgEncoder1(nn.Module):
     # 1D Dilated Causal Convolution
     def __init__(self, in_ch, clsnum, h_ch, out_ch, mid_ch, num_layers=8, dor=0.1):
-        super(PreDecoder1, self).__init__()
+        super(TrgEncoder1, self).__init__()
         
         self.layer_names = []
         assert num_layers > 1
@@ -96,55 +94,10 @@ class PreDecoder1(nn.Module):
         Q = self.end(out)
         return Q, state
 
-class Attention1(nn.Module):
-    # Scaled dot-product attention
-    def __init__(self, dor=0.9):
-        super(Attention1, self).__init__()
-        self.dropout = nn.Dropout(p=dor)
-
-    def __call__(self, x, z, l=None, state=None):
-        K, V = torch.split(z, z.shape[1]//2, dim=1)
-        d = K.shape[1]
-        A = F.softmax(torch.matmul(K.permute(0,2,1), x)/np.sqrt(d), dim=1)
-        # A.shape: 1 x N x T
-        R = torch.matmul(V,A)
-        # R.shape: 1 x d x T
-        R = torch.cat((R,self.dropout(x)), dim=1)
-
-        return R, A, state
-
-    def skip_attn(self, x, z, l=None, state=None):
-        K, V = torch.split(z, z.shape[1]//2, dim=1)
-        R = torch.cat((V,self.dropout(x)), dim=1)
-        return R, state
-
-    def fwd_attn(self, x, z, l=None, attn_range=None, state=None):
-        K, V = torch.split(z, z.shape[1]//2, dim=1)
-        d = K.shape[1]
-        A = F.softmax(torch.matmul(K.permute(0,2,1), x)/np.sqrt(d), dim=1)
-
-        # attn_range is assumed to be a tuple of the smallest and greatest values in the attention range
-        if attn_range is not None:
-            N = A.shape[1]
-            #A_np = A.detach().cpu().clone().numpy()
-            #A_np[0,0:max(attn_range[0],0),0] = 0
-            #A_np[0,min(attn_range[1],N-1):,0] = 0
-            #A_np = (np.maximum(A_np,1e-10))/np.sum(np.maximum(A_np,1e-10))
-            #A_ = torch.tensor(A_np).to(device, dtype=torch.float)
-            A[0,0:max(attn_range[0],0),0] = 0
-            A[0,min(attn_range[1],N-1):,0] = 0
-
-        # A.shape: 1 x N x T
-        R = torch.matmul(V,A)
-        # R.shape: 1 x d x T
-        R = torch.cat((R,self.dropout(x)), dim=1)
-
-        return R, A, state
-
-class PostDecoder1(nn.Module):
+class Decoder1(nn.Module):
     # 1D Dilated Causal Convolution
     def __init__(self, in_ch, clsnum, h_ch, out_ch, mid_ch, num_layers=8, dor=0.1):
-        super(PostDecoder1, self).__init__()
+        super(Decoder1, self).__init__()
         
         self.layer_names = []
         assert num_layers > 1
@@ -186,81 +139,13 @@ class PostDecoder1(nn.Module):
 
         return y, state
 
-class Decoder1(nn.Module):
-    # 1D Dilated Causal Convolution
-    def __init__(self, in_ch, clsnum, h_ch, out_ch, z_ch, mid_ch, num_layers=8, num_blocks=1, dor=0.1):
-        super(Decoder1, self).__init__()
 
-        self.num_blocks = num_blocks
-        self.predec_blocks = nn.ModuleList()
-        self.attn_blocks = nn.ModuleList()
-        self.postdec_blocks = nn.ModuleList()
-        for i in range(num_blocks):
-            self.predec_blocks.append(PreDecoder1(in_ch, clsnum, h_ch, z_ch, mid_ch, num_layers, dor=dor))
-            self.attn_blocks.append(Attention1(dor=0.9))
-            self.postdec_blocks.append(PostDecoder1(z_ch*2, clsnum, h_ch, out_ch, mid_ch, num_layers, dor=dor))
 
-    def __call__(self, x, z, c, state=None):
-        if state is None:
-            state_predec = [None]*self.num_blocks
-            state_postdec = [None]*self.num_blocks
-        else:
-            state_predec, state_postdec = state
-
-        out = x
-        Alist = []
-        for predec, attn, postdec in zip(self.predec_blocks, self.attn_blocks, self.postdec_blocks):
-            out, _state_predec = predec(out,c,state=state_predec.pop(0))
-            state_predec += [_state_predec]
-            out, A, _ = attn(out,z)
-            out, _state_postdec = postdec(out,c,state=state_postdec.pop(0))
-            state_postdec += [_state_postdec]
-            Alist.append(A)
-
-        state = [state_predec, state_postdec]
-        return out, Alist, state
-
-    def skip_attn(self, x, z, c, state=None):
-        if state is None:
-            state_predec = [None]*self.num_blocks
-            state_postdec = [None]*self.num_blocks
-        else:
-            state_predec, state_postdec = state
-
-        out = x
-        for predec, attn, postdec in zip(self.predec_blocks, self.attn_blocks, self.postdec_blocks):
-            out, _state_predec = predec(out,c,state=state_predec.pop(0))
-            state_predec += [_state_predec]
-            out, _ = attn.skip_attn(out,z)
-            out, _state_postdec = postdec(out,c,state=state_postdec.pop(0))
-            state_postdec += [_state_postdec]
-
-        state = [state_predec, state_postdec]
-        return out, state
-
-    def fwd_attn(self, x, z, c, attn_range, state=None):
-        if state is None:
-            state_predec = [None]*self.num_blocks
-            state_postdec = [None]*self.num_blocks
-        else:
-            state_predec, state_postdec = state
-
-        out = x
-        Alist = []
-        for predec, attn, postdec in zip(self.predec_blocks, self.attn_blocks, self.postdec_blocks):
-            out, _state_predec = predec(out,c,state=state_predec.pop(0))
-            state_predec += [_state_predec]
-            out, A, _ = attn.fwd_attn(out,z,attn_range=attn_range)
-            out, _state_postdec = postdec(out,c,state=state_postdec.pop(0))
-            state_postdec += [_state_postdec]
-            Alist.append(A)
-
-        state = [state_predec, state_postdec]
-        return out, Alist, state
-
-class S2S():
-    def __init__(self, enc, dec):
-        self.enc = enc
+class ConvS2S(nn.Module):
+    def __init__(self, enc_src, enc_trg, dec):
+        super(ConvS2S, self).__init__()
+        self.enc_src = enc_src
+        self.enc_trg = enc_trg
         self.dec = dec
 
     def gaussdis(self, N,mu,sigma):
@@ -271,7 +156,7 @@ class S2S():
         return x
 
     def localpeak(self, A,mu,sigma):
-        epsi = sys.float_info.epsilon
+        epsi = 1e-12
         A = A.flatten()
         N = len(A)
         gw = self.gaussdis(N,mu,sigma).flatten()
@@ -282,7 +167,7 @@ class S2S():
     def subsample(self, x, rf):
         device = x.device
         B,D,N = x.shape
-        N_mod = math.ceil(N/rf)*rf
+        N_mod = int(np.ceil(N/rf))*rf
         if N_mod != N:
             z = torch.tensor(np.zeros((B, D, N_mod-N))).to(device, dtype=torch.float)
             x = torch.cat((x, z), dim=2)
@@ -302,17 +187,30 @@ class S2S():
         out = torch.cat((zero,x),dim=2)
         return out
 
-    def attn_predict(self, x_samples, y_samples):
-        # attention prediction using linear regression
-        t = len(x_samples)
-        assert t > 0
-        slope = (np.mean((y_samples-np.mean(y_samples))*(x_samples-np.mean(x_samples)))
-                    /(max(np.std(x_samples),1e-10)**2))
-        bias = np.mean(y_samples) - slope * np.mean(x_samples)
-        attn_est = int(round(slope*(t+1) + bias))
-        return attn_est
+    def __call__(self, in_s, c_s, in_t, c_t):
+        K_s, V_s = self.enc_src(in_s, c_s)
 
-    def calc_loss(self, x_s, x_t, m_s, m_t, l_s, l_t, pos_weight=1.0,
+        # K_s.shape: B x d x N
+        d = K_s.shape[1]
+        Q_t, _ = self.enc_trg(in_t, c_t)
+        # Q_t.shape: B x d x T
+
+        # Attention matrix
+        # Scaled dot-product attention
+        A = F.softmax(torch.matmul(K_s.permute(0,2,1), Q_t)/np.sqrt(d), dim=1)
+
+        # A.shape: B x N x T
+        R = torch.matmul(V_s,A)
+        # R.shape: B x d x T
+
+        R = torch.cat((R,F.dropout(Q_t, p=0.9)), dim=1)
+
+        y, _ = self.dec(R, c_t)
+
+        return y, A
+
+
+    def calc_loss(self, x_s, x_t, m_s, m_t, c_s, c_t, pos_weight=1.0,
                           gauss_width_da=0.3, reduction_factor = 3):
         # L1 loss with position encoding
         device = x_s.device
@@ -354,9 +252,7 @@ class S2S():
         assert m_s.shape[2] == N
         assert m_t.shape[2] == T
         
-        # Computing model output
-        Z_s = self.enc(in_s, l_s)
-        y, Alist, _ = self.dec(in_t, Z_s, l_t)
+        y, A = self(in_s, c_s, in_t, c_t)
 
         # Main Loss
         MainLoss = torch.sum(torch.mean(
@@ -378,20 +274,14 @@ class S2S():
         W = torch.tensor(W).to(device, dtype=torch.float)
         
         # Diagonal Attention Loss
-        num_blocks = len(Alist)
-        num_heads = Alist[0].shape[0]//BatchSize
-        if num_heads != 1:
-            W = W.unsqueeze(1) 
-            W = W.repeat(1,num_heads,1,1).reshape(BatchSize*num_heads,N,T)
-        #import pdb; pdb.set_trace()
-        DALoss = torch.sum(torch.mean(Alist[0]*W, 1))
-        for i in range(1,num_blocks):
-            DALoss += torch.sum(torch.mean(Alist[i]*W, 1))
-        DALoss = DALoss/(num_blocks*num_heads*torch.sum(m_t))
-        
-        return MainLoss, DALoss, Alist
+        DALoss = torch.sum(torch.mean(A*W, 1))/torch.sum(m_t)
+        #import pdb;pdb.set_trace() # Breakpoint
 
-    def inference(self, x_s, l_s, l_t, rf, pos_weight=1.0, refine='raw'):
+        A_np = A.detach().cpu().clone().numpy()
+        
+        return MainLoss, DALoss, A_np
+
+    def inference(self, x_s, c_s, c_t, rf, pos_weight=1.0, refine='raw'):
         start = time.time()
         
         device = x_s.device
@@ -410,11 +300,13 @@ class S2S():
         in_s[:,0:pos_s.shape[1],:] = in_s[:,0:pos_s.shape[1],:] + pos_s/scale_emb * pos_weight
         x_t = torch.tensor(np.zeros((1,D,1))).to(device, dtype=torch.float)
 
-        self.enc.eval()
+        self.enc_src.eval()
+        self.enc_trg.eval()
         self.dec.eval()
 
         with torch.no_grad():
-            Z = self.enc(in_s,l_s)
+            K, V = self.enc_src(in_s,c_s)
+        d = K.shape[1]
         
         if refine == 'raw' or refine == None:
             # Raw attention
@@ -425,17 +317,19 @@ class S2S():
             pos_t = torch.tensor(pos_t).to(device, dtype=torch.float)
             pos_t = pos_t.repeat(BatchSize,1,1)
 
-            state = None
+            state_out_enc_trg = None
+            state_out_dec = None
             for t in range(0,T):
 
                 in_t[:,0:pos_t.shape[1],:] = in_t[:,0:pos_t.shape[1],:] + pos_t[:,:,t:t+1]/scale_emb * pos_weight
                 
                 with torch.no_grad():
-                    y, Alist, state = self.dec(in_t, Z, l_t, state)
-                    A = Alist[0]
-                    for b in range(1,len(Alist)):
-                        A += Alist[b]
-                    A = A/len(Alist)
+                    Q, state_out_enc_trg = self.enc_trg(in_t, c_t, state_out_enc_trg)
+                    # Scaled dot-product attention
+                    A = F.softmax(torch.matmul(K.permute(0,2,1), Q)/np.sqrt(d), dim=1)
+                    R = torch.matmul(V,A)
+                    R = torch.cat((R,F.dropout(Q, p=0.0, training=False)), dim=1)
+                    y, state_out_dec = self.dec(R,c_t, state_out_dec)
                     y_concat = y if t == 0 else torch.cat((y_concat,y), dim=2)
                     A_concat = A if t == 0 else torch.cat((A_concat,A), dim=2)
                     in_t = y
@@ -458,13 +352,16 @@ class S2S():
             pos_t = torch.tensor(pos_t).to(device, dtype=torch.float)
             pos_t = pos_t.repeat(BatchSize,1,1)
 
-            state = None
+            state_out_enc_trg = None
+            state_out_dec = None
             for t in range(0,T):
 
                 in_t[:,0:pos_t.shape[1],:] = in_t[:,0:pos_t.shape[1],:] + pos_t[:,:,t:t+1]/scale_emb * pos_weight
 
                 with torch.no_grad():
-                    y, state = self.dec.skip_attn(in_t, Z[:,:,t:t+1], l_t, state)
+                    Q, state_out_enc_trg = self.enc_trg(in_t, c_t, state_out_enc_trg)
+                    R = torch.cat((V[:,:,t:t+1],F.dropout(Q, p=0.0, training=False)), dim=1)
+                    y, state_out_dec = self.dec(R,c_t, state_out_dec)
                     y_concat = y if t == 0 else torch.cat((y_concat,y), dim=2)
                     in_t = y
 
@@ -476,43 +373,55 @@ class S2S():
         elif refine == 'forward':
             # Forward attention
             T = round(N*2.0)
-            attn_peak = 0
-            attn_range = (attn_peak-20//rf, attn_peak+40//rf)
-            y_samples = []
-            x_samples = []
+            n_argmax = 0
+            y_samples = np.array([0])
+            x_samples = np.array([0])
             in_t = x_t
 
             pos_t = md.position_encoding(T, D)
             pos_t = torch.tensor(pos_t).to(device, dtype=torch.float)
             pos_t = pos_t.repeat(BatchSize,1,1)
 
-            state = None
+            state_out_enc_trg = None
+            state_out_dec = None
             for t in range(0,T):
 
                 in_t[:,0:pos_t.shape[1],:] = in_t[:,0:pos_t.shape[1],:] + pos_t[:,:,t:t+1]/scale_emb * pos_weight
 
                 with torch.no_grad():
-                    y, Alist, state = self.dec.fwd_attn(in_t, Z, l_t, attn_range, state)
+                    Q, state_out_enc_trg = self.enc_trg(in_t, c_t, state_out_enc_trg)
+                    # Scaled dot-product attention
+                    A = F.softmax(torch.matmul(K.permute(0,2,1), Q)/np.sqrt(d), dim=1)
 
-                    A = Alist[0]
-                    for b in range(1,len(Alist)):
-                        A += Alist[b]
-                    A = A/len(Alist)
                     A_np = A.detach().cpu().clone().numpy()
-                    attn_peak = self.localpeak(A_np,attn_peak,5.0)[0]
+                    # Prediction of attended time point
+                    if t==0:
+                        n_argmax_tmp = self.localpeak(A_np,n_argmax,5.0)[0]
+                        if n_argmax_tmp > n_argmax:
+                            n_argmax = n_argmax_tmp
+                    else:
+                        n_argmax_tmp = self.localpeak(A_np,n_argmax,5.0)[0]
+                        y_samples = np.append(y_samples,n_argmax_tmp)
+                        x_samples = np.append(x_samples,t)
+                        slope = (np.mean((y_samples-np.mean(y_samples))*(x_samples-np.mean(x_samples)))
+                                 /(max(np.std(x_samples),1e-10)**2))
+                        n_argmax = int(round(slope*(t+1)))
 
-                    y_samples.append(attn_peak)
-                    x_samples.append(t)
-                    attn_peak = self.attn_predict(x_samples,y_samples)
-                    attn_range = (attn_peak-20//rf, attn_peak+40//rf)
-
+                    A_np[0,0:max(n_argmax-20//rf,0),0] = 0
+                    A_np[0,min(n_argmax+40//rf,N-1):,0] = 0
+                    A_np = (np.maximum(A_np,1e-10))/np.sum(np.maximum(A_np,1e-10))
+                    A_ = torch.tensor(A_np).to(device, dtype=torch.float)
+                    A_concat = A_ if t == 0 else torch.cat((A_concat, A_), dim=2)
+                    R = torch.matmul(V,A_)
+                    R = torch.cat((R,F.dropout(Q, p=0.0, training=False)), dim=1)
+                    y, state_out_dec = self.dec(R,c_t,state_out_dec)
                     y_concat = y if t == 0 else torch.cat((y_concat,y), dim=2)
-                    A_concat = A if t == 0 else torch.cat((A_concat,A), dim=2)
+
                     in_t = y
 
             elapsed_time = time.time() - start
             A_tmp = A_concat[0,:,:].detach().cpu().clone().numpy()**0.3
-
+            #import pdb;pdb.set_trace() # Breakpoint
             path = self.mydtw_fromDistMat(1.0-A_tmp,w=100,p=0.1)
             end_of_frame = path[1][-1]
             #end_of_frame = T
@@ -551,6 +460,8 @@ class S2S():
         else:
             r_end = r-1
             c_end = np.argmin(AccDis[r-1,:])
+
+        #import pdb;pdb.set_trace() # Breakpoint
             
         # trace back
         path_r, path_c = [r_end], [c_end]
@@ -566,4 +477,5 @@ class S2S():
             path_r.insert(0, i)
             path_c.insert(0, j)
 
+        #import pdb;pdb.set_trace() # Breakpoint
         return np.array(path_r), np.array(path_c)

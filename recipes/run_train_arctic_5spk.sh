@@ -14,7 +14,7 @@ db_dir="/misc/raid58/kameoka.hirokazu/db/arctic_5spk/wav/training"
 dataset_name="arctic_5spk"
 gpu=0
 start_stage=0
-exp_name="conv_exp1"
+exp_name="exp1"
 
 while getopts "g:s:e:" opt; do
        case $opt in

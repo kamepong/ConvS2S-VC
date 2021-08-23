@@ -14,9 +14,9 @@ db_dir="/misc/raid58/kameoka.hirokazu/db/seiyu/wav/training"
 dataset_name="seiyu"
 gpu=0
 start_stage=0
-exp_name="conv_exp1"
+exp_name="exp1"
 
-while getopts "g:a:s:e:" opt; do
+while getopts "g:s:e:" opt; do
        case $opt in
               g ) gpu=$OPTARG;;
               s ) start_stage=$OPTARG;;
@@ -33,7 +33,7 @@ log_dir="./logs/${dataset_name}"
 
 # Stage 0: Feature extraction
 if [[ ${start_stage} -le 0 ]]; then
-       python extract_features.py --src ${db_dir} --dst ${feat_dir} --conf ${dconf_path}
+       python extract_features.py --src ${db_dir} --dst ${feat_dir} --conf ${dconf_path} --trim_silence
        python compute_statistics.py --src ${feat_dir} --stat ${stat_path}
        python normalize_features.py --src ${feat_dir} --dst ${normfeat_dir} --stat ${stat_path}
 fi
