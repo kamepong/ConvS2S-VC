@@ -74,7 +74,6 @@ def find_newest_model_file(model_dir, tag):
 
 def synthesis(melspec, pwg, pwg_config, savepath, device):
     ## Parallel WaveGAN / MelGAN
-    #import pdb; pdb.set_trace()
     melspec = torch.tensor(melspec, dtype=torch.float).to(device)
     #start = time.time()
     x = pwg.inference(melspec).view(-1)
@@ -84,7 +83,6 @@ def synthesis(melspec, pwg, pwg_config, savepath, device):
     #print ("real time factor (waveform generation): {0}".format(rtf2))
     
     # save as PCM 16 bit wav file
-    #import pdb;pdb.set_trace() # Breakpoint
     if not os.path.exists(os.path.dirname(savepath)):
         os.makedirs(os.path.dirname(savepath))
     sf.write(savepath, x.detach().cpu().clone().numpy(), pwg_config["sampling_rate"], "PCM_16")
@@ -99,6 +97,7 @@ def main():
     parser.add_argument('--dataconf', type=str, default='./dump/arctic/data_config.json')
     parser.add_argument('--stat', type=str, default='./dump/arctic/stat.pkl', help='state file used for normalization')                        
     parser.add_argument('--model_rootdir', '-mdir', type=str, default='./model/arctic/', help='model file directory')
+    parser.add_argument('--checkpoint', '-ckpt', type=int, default=0, help='model checkpoint to load')
     parser.add_argument('--refine_type', '-ref', type=str, default='raw', help='attention refining process type')
     parser.add_argument('--experiment_name', '-exp', default='experiment1', type=str, help='experiment name')
     parser.add_argument('--vocoder', '-voc', default='parallel_wavegan.v1', type=str,
@@ -122,6 +121,7 @@ def main():
         data_config = json.load(f)
     with open(model_config_path) as f:
         model_config = json.load(f)
+    checkpoint = args.checkpoint
 
     num_mels = model_config['num_mels']
     n_spk = model_config['n_spk']
@@ -145,24 +145,21 @@ def main():
         print('Stat file not found.')
 
     # Set up main model
-    models = {
-        'enc_src' : net.SrcEncoder1(num_mels*reduction_factor,n_spk,hdim,zdim,kdim,num_layers),
-        'enc_trg' : net.TrgEncoder1(num_mels*reduction_factor,n_spk,hdim,zdim,kdim,num_layers),
-        'dec' : net.Decoder1(zdim*2,n_spk,hdim,num_mels*reduction_factor,mdim,num_layers)
-    }
-    models['convs2s'] = net.ConvS2S(models['enc_src'], models['enc_trg'], models['dec'])
+    enc_src = net.SrcEncoder1(num_mels*reduction_factor,n_spk,hdim,zdim,kdim,num_layers)
+    enc_trg = net.TrgEncoder1(num_mels*reduction_factor,n_spk,hdim,zdim,kdim,num_layers)
+    dec = net.Decoder1(zdim*2,n_spk,hdim,num_mels*reduction_factor,mdim,num_layers)
+    model = net.ConvS2S(enc_src, enc_trg, dec)
 
-    for tag in ['enc_src', 'enc_trg', 'dec']:
-        model_dir = os.path.join(args.model_rootdir,args.experiment_name)
-        mfilename = find_newest_model_file(model_dir, tag)
-        path = os.path.join(args.model_rootdir,args.experiment_name,mfilename)
-        if path is not None:
-            checkpoint = torch.load(path, map_location=device)
-            models[tag].load_state_dict(checkpoint['model_state_dict'])
-            print('{}: {}'.format(tag, mfilename))
+    tag = 'convs2s'
+    model_dir = os.path.join(args.model_rootdir,args.experiment_name)
+    mfilename = find_newest_model_file(model_dir, tag) if checkpoint <= 0 else '{}.{}.pt'.format(checkpoint,tag)
+    path = os.path.join(args.model_rootdir,args.experiment_name,mfilename)
+    if path is not None:
+        convs2s_checkpoint = torch.load(path, map_location=device)
+        model.load_state_dict(convs2s_checkpoint['model_state_dict'])
+        print('{}: {}'.format(tag, mfilename))
 
-    for tag in ['enc_src', 'enc_trg', 'dec']:
-        models[tag].to(device).eval()
+    model.to(device).eval()
 
     # Set up PWG
     vocoder = args.vocoder
@@ -188,16 +185,17 @@ def main():
     for i, src_spk in enumerate(src_spk_list):
         src_wav_dir = os.path.join(input_dir, src_spk)
         for j, trg_spk in enumerate(trg_spk_list):
-            print('Converting {}2{}...'.format(src_spk, trg_spk))
-            for n, src_wav_filename in enumerate(os.listdir(src_wav_dir)):
-                src_wav_filepath = os.path.join(src_wav_dir, src_wav_filename)
-                src_melspec = audio_transform(src_wav_filepath, melspec_scaler, data_config, device)
+            if src_spk != trg_spk:
+                print('Converting {}2{}...'.format(src_spk, trg_spk))
+                for n, src_wav_filename in enumerate(os.listdir(src_wav_dir)):
+                    src_wav_filepath = os.path.join(src_wav_dir, src_wav_filename)
+                    src_melspec = audio_transform(src_wav_filepath, melspec_scaler, data_config, device)
 
-                conv_melspec, A, elapsed_time = models['convs2s'].inference(src_melspec, i, j, reduction_factor, pos_weight, refine_type)
-                conv_melspec = conv_melspec.T # n_frames x n_mels
+                    conv_melspec, A, elapsed_time = model.inference(src_melspec, i, j, reduction_factor, pos_weight, refine_type)
+                    conv_melspec = conv_melspec.T # n_frames x n_mels
 
-                out_wavpath = os.path.join(args.out,args.experiment_name,'{}2{}'.format(src_spk,trg_spk), src_wav_filename)
-                synthesis(conv_melspec, pwg, pwg_config, out_wavpath, device)
+                    out_wavpath = os.path.join(args.out,args.experiment_name,refine_type,'{}2{}'.format(src_spk,trg_spk), src_wav_filename)
+                    synthesis(conv_melspec, pwg, pwg_config, out_wavpath, device)
 
 
 if __name__ == '__main__':
