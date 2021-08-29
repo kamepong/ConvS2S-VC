@@ -68,6 +68,8 @@ python compute_statistics.py
 python normalize_features.py
 ```
 
+
+
 #### Train
 
 To train the model, execute:
@@ -78,8 +80,7 @@ python train.py [-g gpu] [-exp exp_name]
 
 - Options:
   - -g: GPU device# ("-1" for CPU)
-  - -arc: Architecture type ("conv", "rnn", or "trans")
-  - -exp: Experiment name (e.g., "conv_exp1")
+  - -exp: Experiment name (e.g., "exp1")
 
 To monitor the training process, use tensorboard:
 
@@ -87,13 +88,20 @@ To monitor the training process, use tensorboard:
 tensorboard [--logdir log_path]
 ```
 
+
+
 #### Test
 
 To perform conversion, execute:
 
 ```bash
-python convert.py [-g gpu] [-exp exp_name]
+python convert.py [-g gpu] [-exp exp_name] [-ckpt checkpoint]
 ```
+
+- Options:
+  - -g: GPU device# (CPU will be used if not specified)
+  - -exp: Experiment name (e.g., "exp1")
+  - -ckpt: Model checkpoint (The newest model will be selected if not specified)
 
 
 
