@@ -1,4 +1,0 @@
-Enabled tensorboard
-Defined S2S as nn.Module class
-shuffle=True, drop_last=True
-Merged subnetworks into a single model and optimizers into a single optimizer
