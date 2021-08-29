@@ -17,13 +17,13 @@ refine_type="raw"
 checkpoint=0
 
 while getopts "g:e:c:fd" opt; do
-       case $opt in
-              g ) gpu=$OPTARG;;
-              e ) exp_name=$OPTARG;;
-			  c ) checkpoint=$OPTARG;;
-			  f ) refine_type="forward";;
-			  d ) refine_type="diagonal";;
-       esac
+	case $opt in
+		g ) gpu=$OPTARG;;
+		e ) exp_name=$OPTARG;;
+		c ) checkpoint=$OPTARG;;
+		f ) refine_type="forward";;
+		d ) refine_type="diagonal";;
+	esac
 done
 
 echo "Experiment name: ${exp_name}, Attention mode: ${refine_type}"
