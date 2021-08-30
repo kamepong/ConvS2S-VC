@@ -24,8 +24,6 @@ while getopts "g:s:e:" opt; do
        esac
 done
 
-cond="--epochs 200 --snapshot 20"
-
 feat_dir="./dump/${dataset_name}/feat/train"
 dconf_path="./dump/${dataset_name}/data_config.json"
 stat_path="./dump/${dataset_name}/stat.pkl"
