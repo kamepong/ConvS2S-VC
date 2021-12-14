@@ -1,17 +1,17 @@
-#!/bin/sh
+#!/bin/bash
 
 # Copyright 2021 Hirokazu Kameoka
 # 
 # Usage:
-# ./run_train_ATR_5spk.sh [-g gpu] [-s stage] [-e exp_name]
+# ./run_train.sh [-g gpu] [-s stage] [-e exp_name]
 # Options:
 #     -g: GPU device# 
 #     -s: Stage to start (0 or 1)
 #     -e: Experiment name (e.g., "exp1")
 
 # Default values
-db_dir="/misc/raid58/kameoka.hirokazu/db/ATR_Bset_5spk/wav/training"
-dataset_name="ATR_5spk"
+db_dir="/path/to/dataset/training"
+dataset_name="mydataset"
 gpu=0
 start_stage=0
 exp_name="exp1"
@@ -33,7 +33,7 @@ log_dir="./logs/${dataset_name}"
 
 # Stage 0: Feature extraction
 if [[ ${start_stage} -le 0 ]]; then
-       python extract_features.py --src ${db_dir} --dst ${feat_dir} --conf ${dconf_path} --trim_silence
+       python extract_features.py --src ${db_dir} --dst ${feat_dir} --conf ${dconf_path}
        python compute_statistics.py --src ${feat_dir} --stat ${stat_path}
        python normalize_features.py --src ${feat_dir} --dst ${normfeat_dir} --stat ${stat_path}
 fi

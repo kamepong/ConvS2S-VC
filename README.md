@@ -1,31 +1,26 @@
 # ConvS2S-VC
 
-This repository provides an official PyTorch implementation for [ConvS2S-VC](http://www.kecl.ntt.co.jp/people/kameoka.hirokazu/Demos/convs2s-vc2/index.html).
+This repository provides an official PyTorch implementation for [ConvS2S-VC](http://www.kecl.ntt.co.jp/people/kameoka.hirokazu/Demos/s2s-vc/index.html).
 
-ConvS2S-VC uses a fully convolutional sequence-to-sequence (ConvS2S) model to learn mappings between the mel-spectrograms of source and target speech, and [Parallel WaveGAN](https://github.com/kan-bayashi/ParallelWaveGAN) to generate a waveform from the converted mel-spectrogram. 
+ConvS2S-VC is a parallel many-to-many voice conversion (VC) method using a fully convolutional sequence-to-sequence (ConvS2S) model. The current version performs VC by first modifying the mel-spectrogram of input speech in accordance with a target speaker or style index, and then generating a waveform using a speaker-independent neural vocoder (Parallel WaveGAN or HiFi-GAN) from the converted mel-spectrogram. 
 
-Audio samples are available [here](http://www.kecl.ntt.co.jp/people/kameoka.hirokazu/Demos/convs2s-vc2/index.html).
+Audio samples are available [here](http://www.kecl.ntt.co.jp/people/kameoka.hirokazu/Demos/s2s-vc/index.html).
 
-#### Prerequisites
-
-- See `requirements.txt`.
-- See https://github.com/kan-bayashi/ParallelWaveGAN for the packages needed to set up Parallel WaveGAN.
-
-
-
-## Paper
+## Papers
 
 - [Hirokazu Kameoka](http://www.kecl.ntt.co.jp/people/kameoka.hirokazu/index-e.html), [Kou Tanaka](http://www.kecl.ntt.co.jp/people/tanaka.ko/index.html), [Takuhiro Kaneko](http://www.kecl.ntt.co.jp/people/kaneko.takuhiro/index.html), "**FastS2S-VC: Streaming Non-Autoregressive Sequence-to-Sequence Voice Conversion**," arXiv:2104.06900 [cs.SD], 2021. [**[Paper]**](https://arxiv.org/abs/2104.06900) 
 
 - [Hirokazu Kameoka](http://www.kecl.ntt.co.jp/people/kameoka.hirokazu/index-e.html), [Kou Tanaka](http://www.kecl.ntt.co.jp/people/tanaka.ko/index.html), Damian Kwasny, [Takuhiro Kaneko](http://www.kecl.ntt.co.jp/people/kaneko.takuhiro/index.html), Nobukatsu Hojo, "**ConvS2S-VC: Fully Convolutional Sequence-to-Sequence Voice Conversion**," *IEEE/ACM Transactions on Audio, Speech, and Language Processing*, vol. 28, pp. 1849-1863, Jun. 2020. [**[Paper]**](https://ieeexplore.ieee.org/document/9113442) 
 
-
-
 ## Preparation
+
+#### Requirements
+
+- See `requirements.txt`.
 
 #### Dataset
 
-1. Setup your training dataset. The data structure should look like:
+1. Setup your training and test sets. The data structure should look like:
 
 ```bash
 /path/to/dataset/training
@@ -38,49 +33,60 @@ Audio samples are available [here](http://www.kecl.ntt.co.jp/people/kameoka.hiro
 └── spk_N
     ├── utt1.wav
     ...
+    
+/path/to/dataset/test
+├── spk_1
+│   ├── utt1.wav
+│   ...
+├── spk_2
+│   ├── utt1.wav
+│   ...
+└── spk_N
+    ├── utt1.wav
+    ...
 ```
 
-#### Parallel WaveGAN
+#### Waveform generator
 
-1. Setup Parallel WaveGAN.  Place a copy of the directory `parallel_wavegan` from https://github.com/kan-bayashi/ParallelWaveGAN in `pwg/`.
-2. Parallel WaveGAN models trained on several databases can be found [here](https://app.box.com/folder/127558077224). Once these are downloaded, place them in `pwg/egs/`. Please contact me if you have any problems downloading.
-
-```bash
-# Model trained on the ATR database (11 speakers)
-cp -r ATR_all_flen64ms_fshift8ms pwg/egs/
-# Model trained on the CMU ARCTIC dataset (4 speakers)
-cp -r arctic_4spk_flen64ms_fshift8ms pwg/egs/
-```
-
-
+1. Place a copy of the directory `parallel_wavegan` from https://github.com/kan-bayashi/ParallelWaveGAN in `pwg/`.
+2. HifiGAN models trained on several databases can be found [here](https://drive.google.com/drive/folders/1RvagKsKaCih0qhRP6XkSF07r3uNFhB5T?usp=sharing). Once these are downloaded, place them in `pwg/egs/`. Please contact me if you have any problems downloading.
+3. Optionally, Parallel WaveGAN can be used instead for waveform generation. The trained models are available [here](https://drive.google.com/drive/folders/1zRYZ9dx16dONn1SEuO4wXjjgJHaYSKwb?usp=sharing). Once these are downloaded, place them in `pwg/egs/`. 
 
 ## Main
 
-See shell scripts in `recipes` for examples of training on different datasets.
-
-#### Feature Extraction
-
-To extract the normalized mel-spectrograms from the training utterances, execute:
-
-```bash
-python extract_features.py
-python compute_statistics.py
-python normalize_features.py
-```
-
-
-
 #### Train
 
-To train the model, execute:
+To run all stages for model training, execute:
 
 ```bash
-python train.py [-g gpu] [-exp exp_name]
+./recipes/run_train.sh [-g gpu] [-s stage] [-e exp_name]
 ```
 
 - Options:
-  - -g: GPU device# ("-1" for CPU)
-  - -exp: Experiment name (e.g., "exp1")
+
+  ```bash
+  -g: GPU device (default: -1)
+  #    -1 indicates CPU
+  -s: Stage to start (0 or 1)
+  #    Stages 0 and 1 correspond to feature extraction and model training, respectively.
+  -e: Experiment name (default: "exp1")
+  #    This name will be used at test time to specify which trained model to load.
+  ```
+
+- Examples:
+
+  ```bash
+  # To run the training from scratch with the default settings:
+  ./recipes/run_train.sh
+  
+  # To skip the feature extraction stage:
+  ./recipes/run_train.sh -s 1
+  
+  # To set the gpu device to, say, 0:
+  ./recipes/run_train.sh -g 0
+  ```
+
+See other scripts in `recipes` for examples of training on different datasets. 
 
 To monitor the training process, use tensorboard:
 
@@ -88,22 +94,45 @@ To monitor the training process, use tensorboard:
 tensorboard [--logdir log_path]
 ```
 
-
-
 #### Test
 
 To perform conversion, execute:
 
 ```bash
-python convert.py [-g gpu] [-exp exp_name] [-ckpt checkpoint]
+./recipes/run_test.sh [-g gpu] [-e exp_name] [-c checkpoint] [-a attention_mode] [-v vocoder]
 ```
 
 - Options:
-  - -g: GPU device# (CPU will be used if not specified)
-  - -exp: Experiment name (e.g., "exp1")
-  - -ckpt: Model checkpoint (The newest model will be selected if not specified)
 
+  ```bash
+  -g: GPU device (default: -1)
+  #    -1 indicates CPU
+  -e: Experiment name (e.g., "exp1")
+  -c: Model checkpoint to load (default: 0)
+  #    0 indicates the newest model
+  -a: Attention mode ("r", "f", or "d")
+  #    The modes in which the attention matrix is processed during conversion
+  #    r: raw attention (default)
+  #    f: windowed attention
+  #    d: exactly diagonal attention
+  -v: Vocoder type ("hfg" or "pwg")
+  #    The type of vocoder used for waveform generation
+  #    hfg: HiFi-GAN (default)
+  #    pwg: Parallel WaveGAN
+  ```
 
+- Examples:
+
+  ```bash
+  # To perform conversion with the default settings:
+  ./recipes/run_test.sh -g 0 -e exp1
+  
+  # To enable attention windowing:
+  ./recipes/run_test.sh -g 0 -e exp1 -a f
+  
+  # To use Parallel WaveGAN as an alternative for waveform generation:
+  ./recipes/run_test.sh -g 0 -e exp1 -v pwg
+  ```
 
 ## Citation
 

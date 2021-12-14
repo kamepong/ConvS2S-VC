@@ -13,7 +13,7 @@ from torch.utils.tensorboard import SummaryWriter
 from torch.utils.data import DataLoader
 
 from dataset import MultiDomain_Dataset, collate_fn
-import convs2s_net as net
+import net
 
 def makedirs_if_not_exists(dir):
     if not os.path.exists(dir):
@@ -58,7 +58,7 @@ def Train(model, epochs, train_loader, optimizer, model_config, device, model_di
         print('{} loaded successfully.'.format(checkpointpath))
 
     n_iter = 0
-    print("===================================Start Training===================================")
+    print("===================================Training Started===================================")
     logging.info(model_dir)
     for epoch in range(resume+1, epochs+1):
         b = 0
@@ -123,7 +123,7 @@ def Train(model, epochs, train_loader, optimizer, model_config, device, model_di
 
         if epoch % snapshot == 0:
             tag = 'convs2s'
-            #print('save {} at {} epoch'.format(tag, epoch))
+            print('save {} at {} epoch'.format(tag, epoch))
             torch.save({'epoch': epoch,
                         'model_state_dict': model.state_dict(),
                         'optimizer_state_dict': optimizer.state_dict()},
@@ -132,11 +132,11 @@ def Train(model, epochs, train_loader, optimizer, model_config, device, model_di
     print("===================================Training Finished===================================")
 
 def main():
-    parser = argparse.ArgumentParser(description='ConvS2S-VC')
+    parser = argparse.ArgumentParser(description='Train ConvS2S-VC')
     parser.add_argument('--gpu', '-g', type=int, default=-1, help='GPU ID (negative value indicates CPU)')
     parser.add_argument('-ddir', '--data_rootdir', type=str, default='./dump/arctic/norm_feat/train',
                         help='root data folder that contains the normalized features')
-    parser.add_argument('--epochs', '-epoch', default=100, type=int, help='number of epochs to learn')
+    parser.add_argument('--epochs', '-epoch', default=200, type=int, help='number of epochs to learn')
     parser.add_argument('--snapshot', '-snap', default=10, type=int, help='snapshot interval')
     parser.add_argument('--batch_size', '-batch', type=int, default=16, help='Batch size')
     parser.add_argument('--num_mels', '-nm', type=int, default=80, help='number of mel channels')
@@ -219,10 +219,10 @@ def main():
     with open(config_path, 'w') as outfile:
         json.dump(model_config, outfile, indent=4)
 
-    enc_src = net.SrcEncoder1(num_mels*reduction_factor,n_spk,hdim,zdim,kdim,num_layers,dropout_ratio)
-    enc_trg = net.TrgEncoder1(num_mels*reduction_factor,n_spk,hdim,zdim,kdim,num_layers,dropout_ratio)
-    dec = net.Decoder1(zdim*2,n_spk,hdim,num_mels*reduction_factor,mdim,num_layers,dropout_ratio)
-    model = net.ConvS2S(enc_src, enc_trg, dec)
+    enc = net.Encoder1(num_mels*reduction_factor,n_spk,hdim,zdim,kdim,num_layers,dropout_ratio)
+    predec = net.PreDecoder1(num_mels*reduction_factor,n_spk,hdim,zdim,kdim,num_layers,dropout_ratio)
+    postdec = net.PostDecoder1(zdim*2,n_spk,hdim,num_mels*reduction_factor,mdim,num_layers,dropout_ratio)
+    model = net.ConvS2S(enc, predec, postdec)
     optimizer = optim.Adam(model.parameters(), lr=lrate, betas=(0.9,0.999))
     model.to(device).train(mode=True)
 

@@ -19,7 +19,7 @@ class DilCausConv1D(nn.Module):
             in_ch, out_ch, ks, dilation=df, padding=0)
         self.conv1 = nn.utils.weight_norm(self.conv1)
 
-    def __call__(self, input, state=None):
+    def forward(self, input, state=None):
         if state is None:
             state = torch.zeros_like(input[:, :, :1]).repeat(1, 1, self.padding)
         input = torch.cat([state, input], dim=2)
@@ -36,7 +36,7 @@ class DilConv1D(nn.Module):
             in_ch, out_ch, ks, dilation=df, padding=self.padding)
         self.conv1 = nn.utils.weight_norm(self.conv1)
 
-    def __call__(self, x):
+    def forward(self, x):
         h = self.conv1(x)
         return h
 
@@ -48,7 +48,7 @@ class DilCausConvGLU1D(nn.Module):
             in_ch, out_ch*2, ks, dilation=df, padding=0)
         self.conv1 = nn.utils.weight_norm(self.conv1)
 
-    def __call__(self, input, state=None):
+    def forward(self, input, state=None):
         if state is None:
             state = torch.zeros_like(input[:, :, :1]).repeat(1, 1, self.padding)
         input = torch.cat([state, input], dim=2)
@@ -67,7 +67,7 @@ class DilConvGLU1D(nn.Module):
             in_ch, out_ch*2, ks, dilation=df, padding=self.padding)
         self.conv1 = nn.utils.weight_norm(self.conv1)
 
-    def __call__(self, x):
+    def forward(self, x):
         h = x        
         h = self.conv1(h)
         h_l, h_g = torch.split(h, h.shape[1]//2, dim=1)

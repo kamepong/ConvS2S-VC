@@ -14,9 +14,11 @@ import librosa
 import soundfile as sf
 from sklearn.preprocessing import StandardScaler
 
-import convs2s_net as net
+import net
 from extract_features import logmelfilterbank
 
+import sys
+sys.path.append(os.path.abspath("pwg"))
 from pwg.parallel_wavegan.utils import load_model
 from pwg.parallel_wavegan.utils import read_hdf5
 
@@ -88,7 +90,7 @@ def synthesis(melspec, pwg, pwg_config, savepath, device):
     sf.write(savepath, x.detach().cpu().clone().numpy(), pwg_config["sampling_rate"], "PCM_16")
 
 def main():
-    parser = argparse.ArgumentParser(description='ACVAE-VC')
+    parser = argparse.ArgumentParser(description='Test ConvS2S-VC')
     parser.add_argument('--gpu', '-g', type=int, default=-1, help='GPU ID (negative value indicates CPU)')
     parser.add_argument('-i', '--input', type=str, default='/misc/raid58/kameoka.hirokazu/python/db/arctic/wav/test',
                         help='root data folder that contains the wav files of input speech')
@@ -98,7 +100,7 @@ def main():
     parser.add_argument('--stat', type=str, default='./dump/arctic/stat.pkl', help='state file used for normalization')                        
     parser.add_argument('--model_rootdir', '-mdir', type=str, default='./model/arctic/', help='model file directory')
     parser.add_argument('--checkpoint', '-ckpt', type=int, default=0, help='model checkpoint to load')
-    parser.add_argument('--refine_type', '-ref', type=str, default='raw', help='attention refining process type')
+    parser.add_argument('--attention_mode', '-attn', type=str, default='raw', help='attention mode ("raw", "forward", or "diagonal")')
     parser.add_argument('--experiment_name', '-exp', default='experiment1', type=str, help='experiment name')
     parser.add_argument('--vocoder', '-voc', default='parallel_wavegan.v1', type=str,
                         help='neural vocoder type name (e.g., parallel_wavegan.v1, melgan.v3.long)')
@@ -133,7 +135,7 @@ def main():
     num_layers = model_config['num_layers']
     reduction_factor = model_config['reduction_factor']
     pos_weight = model_config['pos_weight']
-    refine_type = args.refine_type
+    attention_mode = args.attention_mode
 
     stat_filepath = args.stat
     melspec_scaler = StandardScaler()
@@ -145,10 +147,10 @@ def main():
         print('Stat file not found.')
 
     # Set up main model
-    enc_src = net.SrcEncoder1(num_mels*reduction_factor,n_spk,hdim,zdim,kdim,num_layers)
-    enc_trg = net.TrgEncoder1(num_mels*reduction_factor,n_spk,hdim,zdim,kdim,num_layers)
-    dec = net.Decoder1(zdim*2,n_spk,hdim,num_mels*reduction_factor,mdim,num_layers)
-    model = net.ConvS2S(enc_src, enc_trg, dec)
+    enc = net.Encoder1(num_mels*reduction_factor,n_spk,hdim,zdim,kdim,num_layers)
+    predec = net.PreDecoder1(num_mels*reduction_factor,n_spk,hdim,zdim,kdim,num_layers)
+    postdec = net.PostDecoder1(zdim*2,n_spk,hdim,num_mels*reduction_factor,mdim,num_layers)
+    model = net.ConvS2S(enc, predec, postdec)
 
     tag = 'convs2s'
     model_dir = os.path.join(args.model_rootdir,args.experiment_name)
@@ -157,7 +159,7 @@ def main():
     if path is not None:
         convs2s_checkpoint = torch.load(path, map_location=device)
         model.load_state_dict(convs2s_checkpoint['model_state_dict'])
-        print('{}: {}'.format(tag, mfilename))
+        print('{}: {}'.format(tag, os.path.abspath(path)))
 
     model.to(device).eval()
 
@@ -170,8 +172,7 @@ def main():
     pwg_checkpoint = os.path.join(voc_dir,'exp',
                                   'train_nodev_all_{}'.format(vocoder),
                                   checkpointlist[-1]) # Find and use the newest checkpoint model.
-    print('vocoder type: {}'.format(vocoder))
-    print('checkpoint  : {}'.format(checkpointlist[-1]))
+    print('vocoder: {}'.format(os.path.abspath(pwg_checkpoint)))
     
     with open(voc_yaml_path) as f:
         pwg_config = yaml.load(f, Loader=yaml.Loader)
@@ -191,10 +192,10 @@ def main():
                     src_wav_filepath = os.path.join(src_wav_dir, src_wav_filename)
                     src_melspec = audio_transform(src_wav_filepath, melspec_scaler, data_config, device)
 
-                    conv_melspec, A, elapsed_time = model.inference(src_melspec, i, j, reduction_factor, pos_weight, refine_type)
+                    conv_melspec, A, elapsed_time = model.inference(src_melspec, i, j, reduction_factor, pos_weight, attention_mode)
                     conv_melspec = conv_melspec.T # n_frames x n_mels
 
-                    out_wavpath = os.path.join(args.out,args.experiment_name,refine_type,'{}2{}'.format(src_spk,trg_spk), src_wav_filename)
+                    out_wavpath = os.path.join(args.out,args.experiment_name,attention_mode,vocoder,'{}2{}'.format(src_spk,trg_spk), src_wav_filename)
                     synthesis(conv_melspec, pwg, pwg_config, out_wavpath, device)
 
 

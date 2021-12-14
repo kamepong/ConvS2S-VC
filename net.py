@@ -8,10 +8,10 @@ import time
 
 import module as md
 
-class SrcEncoder1(nn.Module):
+class Encoder1(nn.Module):
     # 1D Dilated Non-Causal Convolution
     def __init__(self, in_ch, clsnum, h_ch, out_ch, mid_ch, num_layers=8, dor=0.1):
-        super(SrcEncoder1, self).__init__()
+        super(Encoder1, self).__init__()
         
         self.layer_names = []
         assert num_layers > 1
@@ -31,7 +31,7 @@ class SrcEncoder1(nn.Module):
         self.end = md.DilConv1D(mid_ch+h_ch,out_ch*2,1,1)
         self.dropout = nn.Dropout(p=dor)
         
-    def __call__(self, x, c):
+    def forward(self, x, c):
         device = x.device
         N, n_ch, n_t = x.shape
         t = torch.LongTensor(c*np.ones(N)).to(device, dtype=torch.int64)
@@ -49,10 +49,10 @@ class SrcEncoder1(nn.Module):
         K, V = torch.split(out, out.shape[1]//2, dim=1)
         return K, V
 
-class TrgEncoder1(nn.Module):
+class PreDecoder1(nn.Module):
     # 1D Dilated Causal Convolution
     def __init__(self, in_ch, clsnum, h_ch, out_ch, mid_ch, num_layers=8, dor=0.1):
-        super(TrgEncoder1, self).__init__()
+        super(PreDecoder1, self).__init__()
         
         self.layer_names = []
         assert num_layers > 1
@@ -72,7 +72,7 @@ class TrgEncoder1(nn.Module):
         self.end = md.DilConv1D(mid_ch+h_ch,out_ch,1,1)
         self.dropout = nn.Dropout(p=dor)
             
-    def __call__(self, x, c, state=None):
+    def forward(self, x, c, state=None):
         if state is None:
             state = [None]*self.num_layers
         device = x.device
@@ -94,10 +94,10 @@ class TrgEncoder1(nn.Module):
         Q = self.end(out)
         return Q, state
 
-class Decoder1(nn.Module):
+class PostDecoder1(nn.Module):
     # 1D Dilated Causal Convolution
     def __init__(self, in_ch, clsnum, h_ch, out_ch, mid_ch, num_layers=8, dor=0.1):
-        super(Decoder1, self).__init__()
+        super(PostDecoder1, self).__init__()
         
         self.layer_names = []
         assert num_layers > 1
@@ -116,7 +116,7 @@ class Decoder1(nn.Module):
         self.end = md.DilConv1D(mid_ch+h_ch,out_ch,1,1)
         self.dropout = nn.Dropout(p=dor)
 
-    def __call__(self, x, c, state=None):
+    def forward(self, x, c, state=None):
         if state is None:
             state = [None]*self.num_layers
         device = x.device
@@ -142,11 +142,11 @@ class Decoder1(nn.Module):
 
 
 class ConvS2S(nn.Module):
-    def __init__(self, enc_src, enc_trg, dec):
+    def __init__(self, enc, predec, postdec):
         super(ConvS2S, self).__init__()
-        self.enc_src = enc_src
-        self.enc_trg = enc_trg
-        self.dec = dec
+        self.enc = enc
+        self.predec = predec
+        self.postdec = postdec
 
     def gaussdis(self, N,mu,sigma):
         nN = np.arange(0,N)
@@ -187,12 +187,12 @@ class ConvS2S(nn.Module):
         out = torch.cat((zero,x),dim=2)
         return out
 
-    def __call__(self, in_s, c_s, in_t, c_t):
-        K_s, V_s = self.enc_src(in_s, c_s)
+    def forward(self, in_s, c_s, in_t, c_t):
+        K_s, V_s = self.enc(in_s, c_s)
 
         # K_s.shape: B x d x N
         d = K_s.shape[1]
-        Q_t, _ = self.enc_trg(in_t, c_t)
+        Q_t, _ = self.predec(in_t, c_t)
         # Q_t.shape: B x d x T
 
         # Attention matrix
@@ -205,7 +205,7 @@ class ConvS2S(nn.Module):
 
         R = torch.cat((R,F.dropout(Q_t, p=0.9)), dim=1)
 
-        y, _ = self.dec(R, c_t)
+        y, _ = self.postdec(R, c_t)
 
         return y, A
 
@@ -241,7 +241,7 @@ class ConvS2S(nn.Module):
         scale_emb = D**0.5
 
         in_s = x_s
-        in_s[:,0:pos_s.shape[1],:] = in_s[:,0:pos_s.shape[1],:] + pos_s/scale_emb * pos_weight
+        in_s[:,0:pos_s.shape[1],:] = in_s[:,0:pos_s.shape[1],:] + pos_s/scale_emb * pos_weight 
         in_t = x_t
         in_t[:,0:pos_t.shape[1],:] = in_t[:,0:pos_t.shape[1],:] + pos_t/scale_emb * pos_weight
         
@@ -275,13 +275,12 @@ class ConvS2S(nn.Module):
         
         # Diagonal Attention Loss
         DALoss = torch.sum(torch.mean(A*W, 1))/torch.sum(m_t)
-        #import pdb;pdb.set_trace() # Breakpoint
 
         A_np = A.detach().cpu().clone().numpy()
         
         return MainLoss, DALoss, A_np
 
-    def inference(self, x_s, c_s, c_t, rf, pos_weight=1.0, refine='raw'):
+    def inference(self, x_s, c_s, c_t, rf, pos_weight=1.0, attention_mode='raw'):
         start = time.time()
         
         device = x_s.device
@@ -300,15 +299,15 @@ class ConvS2S(nn.Module):
         in_s[:,0:pos_s.shape[1],:] = in_s[:,0:pos_s.shape[1],:] + pos_s/scale_emb * pos_weight
         x_t = torch.tensor(np.zeros((1,D,1))).to(device, dtype=torch.float)
 
-        self.enc_src.eval()
-        self.enc_trg.eval()
-        self.dec.eval()
+        self.enc.eval()
+        self.predec.eval()
+        self.postdec.eval()
 
         with torch.no_grad():
-            K, V = self.enc_src(in_s,c_s)
+            K, V = self.enc(in_s,c_s)
         d = K.shape[1]
         
-        if refine == 'raw' or refine == None:
+        if attention_mode == 'raw' or attention_mode == None:
             # Raw attention
             T = round(N*2.0)
             in_t = x_t
@@ -317,19 +316,19 @@ class ConvS2S(nn.Module):
             pos_t = torch.tensor(pos_t).to(device, dtype=torch.float)
             pos_t = pos_t.repeat(BatchSize,1,1)
 
-            state_out_enc_trg = None
-            state_out_dec = None
+            state_out_predec = None
+            state_out_postdec = None
             for t in range(0,T):
 
                 in_t[:,0:pos_t.shape[1],:] = in_t[:,0:pos_t.shape[1],:] + pos_t[:,:,t:t+1]/scale_emb * pos_weight
                 
                 with torch.no_grad():
-                    Q, state_out_enc_trg = self.enc_trg(in_t, c_t, state_out_enc_trg)
+                    Q, state_out_predec = self.predec(in_t, c_t, state_out_predec)
                     # Scaled dot-product attention
                     A = F.softmax(torch.matmul(K.permute(0,2,1), Q)/np.sqrt(d), dim=1)
                     R = torch.matmul(V,A)
                     R = torch.cat((R,F.dropout(Q, p=0.0, training=False)), dim=1)
-                    y, state_out_dec = self.dec(R,c_t, state_out_dec)
+                    y, state_out_postdec = self.postdec(R,c_t, state_out_postdec)
                     y_concat = y if t == 0 else torch.cat((y_concat,y), dim=2)
                     A_concat = A if t == 0 else torch.cat((A_concat,A), dim=2)
                     in_t = y
@@ -342,7 +341,7 @@ class ConvS2S(nn.Module):
             #end_of_frame = min(path[1][-1]+20, T)
             #end_of_frame = T
                 
-        elif refine == 'diagonal':
+        elif attention_mode == 'diagonal':
             # Exactly diagonal attention (no time-warping)
             T = N
             end_of_frame = T
@@ -352,16 +351,16 @@ class ConvS2S(nn.Module):
             pos_t = torch.tensor(pos_t).to(device, dtype=torch.float)
             pos_t = pos_t.repeat(BatchSize,1,1)
 
-            state_out_enc_trg = None
-            state_out_dec = None
+            state_out_predec = None
+            state_out_postdec = None
             for t in range(0,T):
 
                 in_t[:,0:pos_t.shape[1],:] = in_t[:,0:pos_t.shape[1],:] + pos_t[:,:,t:t+1]/scale_emb * pos_weight
 
                 with torch.no_grad():
-                    Q, state_out_enc_trg = self.enc_trg(in_t, c_t, state_out_enc_trg)
+                    Q, state_out_predec = self.predec(in_t, c_t, state_out_predec)
                     R = torch.cat((V[:,:,t:t+1],F.dropout(Q, p=0.0, training=False)), dim=1)
-                    y, state_out_dec = self.dec(R,c_t, state_out_dec)
+                    y, state_out_postdec = self.postdec(R,c_t, state_out_postdec)
                     y_concat = y if t == 0 else torch.cat((y_concat,y), dim=2)
                     in_t = y
 
@@ -370,7 +369,7 @@ class ConvS2S(nn.Module):
             A_concat = torch.tensor(A_concat).to(device, dtype=torch.float)
             path = [np.arange(N), np.arange(N)]
 
-        elif refine == 'forward':
+        elif attention_mode == 'forward':
             # Forward attention
             T = round(N*2.0)
             n_argmax = 0
@@ -382,14 +381,14 @@ class ConvS2S(nn.Module):
             pos_t = torch.tensor(pos_t).to(device, dtype=torch.float)
             pos_t = pos_t.repeat(BatchSize,1,1)
 
-            state_out_enc_trg = None
-            state_out_dec = None
+            state_out_predec = None
+            state_out_postdec = None
             for t in range(0,T):
 
                 in_t[:,0:pos_t.shape[1],:] = in_t[:,0:pos_t.shape[1],:] + pos_t[:,:,t:t+1]/scale_emb * pos_weight
 
                 with torch.no_grad():
-                    Q, state_out_enc_trg = self.enc_trg(in_t, c_t, state_out_enc_trg)
+                    Q, state_out_predec = self.predec(in_t, c_t, state_out_predec)
                     # Scaled dot-product attention
                     A = F.softmax(torch.matmul(K.permute(0,2,1), Q)/np.sqrt(d), dim=1)
 
@@ -414,7 +413,7 @@ class ConvS2S(nn.Module):
                     A_concat = A_ if t == 0 else torch.cat((A_concat, A_), dim=2)
                     R = torch.matmul(V,A_)
                     R = torch.cat((R,F.dropout(Q, p=0.0, training=False)), dim=1)
-                    y, state_out_dec = self.dec(R,c_t,state_out_dec)
+                    y, state_out_postdec = self.postdec(R,c_t,state_out_postdec)
                     y_concat = y if t == 0 else torch.cat((y_concat,y), dim=2)
 
                     in_t = y

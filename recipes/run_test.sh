@@ -3,7 +3,7 @@
 # Copyright 2021 Hirokazu Kameoka
 # 
 # Usage:
-# ./run_test_arctic_4spk.sh [-g gpu] [-e exp_name] [-c checkpoint] [-a attention_mode] [-v vocoder_type]
+# ./run_test.sh [-g gpu] [-e exp_name] [-c checkpoint] [-a attention_mode] [-v vocoder_type]
 # Options:
 #     -g: GPU device# (-1 indicates CPU)
 #     -e: Experiment name (e.g., "conv_exp1")
@@ -11,8 +11,8 @@
 #     -a: Attention mode ("raw" (default), "forward", or "diagonal")
 #     -v: Vocoder type ("parallel_wavegan.v1" (default) or "hifigan.v1")
 
-db_dir="/misc/raid58/kameoka.hirokazu/db/arctic/wav/test"
-dataset_name="arctic_4spk"
+db_dir="/path/to/dataset/test"
+dataset_name="mydataset"
 attention_mode="raw"
 checkpoint=0
 vocoder_type="parallel_wavegan.v1"
